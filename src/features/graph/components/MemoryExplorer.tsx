@@ -31,37 +31,39 @@ export function MemoryExplorer() {
     return () => clearTimeout(timer)
   }, [query])
 
-  const handleSelectEntity = useCallback(async (entityId: string, name: string) => {
+  const handleSelectEntity = useCallback(async (entityId: string) => {
     setQuery('')
     setSuggestions([])
-    setSelectedEntityName(name)
     setLoading(true)
     setError(null)
 
     try {
       const data = await fetchRelatedEntities(entityId)
       if (!data || data.related.length === 0) {
-        setError('No connected memories found.')
-        setGraphData(null)
+        if (!graphData) {
+          setError('No connected memories found.')
+          setGraphData(null)
+        }
       } else {
+        setSelectedEntityName(data.center.value)
         setGraphData(data)
       }
     } catch (err) {
       console.error('MemoryExplorer error:', err)
-      setError(`Failed to load relationships: ${String(err)}`)
-      setGraphData(null)
+      if (!graphData) {
+        setError(`Failed to load relationships: ${String(err)}`)
+        setGraphData(null)
+      }
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [graphData])
 
   const handleNodeClick = useCallback(
     async (entityId: string) => {
-      const entity = graphData?.related.find((e) => e.id === entityId)
-      if (!entity) return
-      await handleSelectEntity(entityId, entity.value)
+      await handleSelectEntity(entityId)
     },
-    [graphData, handleSelectEntity],
+    [handleSelectEntity],
   )
 
   const handleNodeDoubleClick = useCallback(
@@ -103,7 +105,7 @@ export function MemoryExplorer() {
                   key={s.id}
                   type="button"
                   role="option"
-                  onClick={() => handleSelectEntity(s.id, s.value)}
+                  onClick={() => handleSelectEntity(s.id)}
                   className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-300 transition-colors hover:bg-neutral-800"
                 >
                   <span className="text-xs text-neutral-500">{s.entityType}</span>

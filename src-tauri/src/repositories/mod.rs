@@ -293,7 +293,9 @@ pub fn get_related_entities(
     entity_id: &str,
 ) -> rusqlite::Result<Option<RelatedEntitiesResponse>> {
     let mut center_stmt = conn.prepare(
-        "SELECT e.id, e.entity_type, e.value, COUNT(ee.entry_id) AS occurrence_count
+        "SELECT e.id, e.entity_type, e.value, COUNT(ee.entry_id) AS occurrence_count,
+                e.confidence,
+                (SELECT COUNT(*) FROM relationships r WHERE r.entity_a_id = e.id OR r.entity_b_id = e.id) AS relationship_count
          FROM entities e
          LEFT JOIN entry_entities ee ON ee.entity_id = e.id
          WHERE e.id = ?1
@@ -307,6 +309,8 @@ pub fn get_related_entities(
                 value: row.get(2)?,
                 occurrence_count: row.get(3)?,
                 relationship_weight: 0,
+                confidence: row.get(4)?,
+                relationship_count: row.get(5)?,
             })
         })
         .optional()?;
@@ -317,7 +321,9 @@ pub fn get_related_entities(
     };
 
     let mut related_stmt = conn.prepare(
-        "SELECT e.id, e.entity_type, e.value, COUNT(ee.entry_id) AS occurrence_count, r.weight
+        "SELECT e.id, e.entity_type, e.value, COUNT(ee.entry_id) AS occurrence_count, r.weight,
+                e.confidence,
+                (SELECT COUNT(*) FROM relationships r2 WHERE r2.entity_a_id = e.id OR r2.entity_b_id = e.id) AS relationship_count
          FROM relationships r
          JOIN entities e ON e.id = CASE WHEN r.entity_a_id = ?1 THEN r.entity_b_id ELSE r.entity_a_id END
          LEFT JOIN entry_entities ee ON ee.entity_id = e.id
@@ -326,13 +332,15 @@ pub fn get_related_entities(
          ORDER BY r.weight DESC
          LIMIT 50",
     )?;
-    let rows = related_stmt.query_map(params![entity_id, entity_id], |row| {
+    let rows = related_stmt.query_map(params![entity_id], |row| {
         Ok(RelatedEntity {
             id: row.get(0)?,
             entity_type: row.get(1)?,
             value: row.get(2)?,
             occurrence_count: row.get(3)?,
             relationship_weight: row.get(4)?,
+            confidence: row.get(5)?,
+            relationship_count: row.get(6)?,
         })
     })?;
 

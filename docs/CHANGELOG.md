@@ -2,13 +2,13 @@
 
 **Version:** v1.0 Development
 
-**Progress:** 10 / 11 Milestones Complete
+**Progress:** 11 / 11 Milestones Complete
 
-**Current Milestone:** Milestone 11 — Release Candidate (v1.0)
+**Current Milestone:** Milestone 11 — Knowledge Graph v1 (Release Candidate)
 
-**Next Milestone:** Milestone 11 — Release Candidate (v1.0)
+**Next Milestone:** (none — all milestones complete)
 
-**Last Updated:** July 13, 2026
+**Last Updated:** July 14, 2026
 
 ## Project Vision
 
@@ -27,7 +27,7 @@ Atlas is a local-first desktop application that automatically builds a connected
 - Milestone 8 — Memory Explorer ✅
 - Milestone 9 — Memory Insights ✅
 - Milestone 10 — Polish & User Experience ✅
-- Milestone 11 — Release Candidate (v1.0) ⏳ Planned
+- Milestone 11 — Knowledge Graph v1 ✅ Complete
 
 ## Documentation Rules
 
@@ -2342,6 +2342,426 @@ but each side of that boundary is independently confirmed (frontend calls
 the Rust side persists and returns correctly). The previously-empty entities tables
 are therefore expected to populate for this entry once the app runs with the Bug
 Fix 2 change in place.
+
+---
+
+## Milestone 11 — Knowledge Graph v1
+
+Status
+
+Complete
+
+### Prompt
+
+Atlas
+
+Milestone 11 — Knowledge Graph v1
+
+Status
+
+Implementation Required
+
+Previous Milestone
+
+Milestone 10 — Polish & User Experience ✅
+
+====================================================
+
+Goal
+
+Transform the existing Memory Explorer into a polished, intelligent, Obsidian-inspired knowledge graph.
+
+The result should feel like a living map of the user's mind — progressive, beautiful, and effortless to explore.
+
+====================================================
+
+Philosophy
+
+This is NOT a static network diagram.
+
+It should feel like Obsidian's graph view:
+
+- You start from one entity.
+- You expand outward naturally.
+- The graph grows as you explore.
+- Weak connections fade.
+- Strong connections stay visible.
+- Everything stays fast and smooth.
+
+====================================================
+
+General Rules
+
+Do NOT use AI.
+
+Do NOT use embeddings.
+
+Do NOT use vector databases.
+
+Do NOT generate fake relationships.
+
+Relationships must come only from the existing SQLite data.
+
+Keep all database logic in Rust.
+
+React is responsible only for rendering and interaction.
+
+====================================================
+
+Scope Constraints
+
+Do NOT rename or restructure the existing Memory Explorer.
+
+Do NOT rewrite the existing graph feature architecture.
+
+Reuse:
+
+- The existing graph feature
+- The existing Entity Browser
+- The existing Entity Detail pages
+- The existing Rust repositories
+- The existing Tauri commands
+
+Improve and polish — not rebuild.
+
+====================================================
+
+The Core Experience
+
+Open Memory Explorer.
+
+Search for an entity.
+
+Select it.
+
+The graph loads around that entity.
+
+From there:
+
+- Click a node to focus on it.
+- The graph expands to show its connections.
+- The original node stays visible.
+- Weak/unrelated nodes fade.
+- Strong connections remain bright.
+
+The graph should feel like a growing web of memory.
+
+====================================================
+
+Graph Behavior
+
+Focus Mode (single entity focus)
+
+When a node is clicked:
+
+- That node becomes the focus.
+- Its direct connections stay fully visible.
+- Everything else dims (reduced opacity).
+- Clicking the background clears focus and restores full visibility.
+
+This mirrors Obsidian's "focus on a node" behavior.
+
+Progressive Expansion
+
+When focusing on a node:
+
+- Load its related entities.
+- Add them to the graph.
+- Keep existing nodes.
+- Animate new nodes in smoothly.
+- Remove unrelated nodes using fade-out.
+- Avoid visible layout jumps.
+
+The graph should accumulate knowledge as the user explores.
+
+Node Importance
+
+Node size should reflect importance.
+
+Use:
+
+- Occurrence count
+- Relationship count
+- Relationship weight
+- Confidence
+
+Combine these into a single importance score.
+
+Stronger, more mentioned, more confident entities = larger nodes.
+
+Edge Importance
+
+Edge thickness should reflect relationship strength.
+
+Use:
+
+- Shared entry count (weight)
+- Confidence of the related entity
+
+Thicker edges = stronger relationships.
+
+Edge opacity can fade for weak connections.
+
+Labels
+
+Node labels should appear only when:
+
+- The node is large enough, OR
+- The zoom level is close enough
+
+This keeps the graph clean at distance and readable up close.
+
+Hover Behavior
+
+On hover:
+
+- Highlight the hovered node.
+- Highlight its direct connections.
+- Fade everything else slightly.
+- Show a small tooltip with:
+  - Entity name
+  - Entity type
+  - Occurrence count
+  - Relationship count
+  - Confidence
+
+Tooltip should be subtle and fast.
+
+====================================================
+
+Interaction
+
+Single Click
+
+- Focus on the node.
+- Expand its connections.
+- Keep the graph stable.
+
+Double Click
+
+Open the existing Entity Detail page.
+
+Zoom
+
+- Mouse wheel zoom.
+- Zoom toward cursor.
+- Smooth, not jumpy.
+
+Pan
+
+- Click and drag background to pan.
+- Node drag is optional.
+
+Reset View
+
+A button to:
+
+- Recenter the graph.
+- Reset zoom to default.
+- Clear focus.
+
+====================================================
+
+Physics & Layout
+
+Use a force-directed layout (already present).
+
+Refine it for beauty and stability:
+
+- Nodes should not overlap.
+- Connected nodes should stay near each other.
+- The graph should settle quickly.
+- After settling, the layout should feel stable.
+- Avoid endless drifting.
+
+The graph should feel alive but calm.
+
+====================================================
+
+Performance
+
+Hard limit:
+
+- Maximum 200 visible nodes.
+
+If more entities exist:
+
+- Load the most important relationships first.
+- Lazy-load neighborhoods as the user explores.
+- Never block the UI.
+
+The graph must stay smooth even with many nodes.
+
+====================================================
+
+Visual Design
+
+Colors
+
+Keep the existing color system consistent with Atlas.
+
+Each entity type has one color.
+
+Use the existing palette.
+
+Do NOT introduce random colors.
+
+Motion
+
+Animations should be:
+
+- Smooth
+- Subtle
+- Fast
+- Purposeful
+
+No distracting motion.
+
+No endless loops.
+
+Edges
+
+Edges should feel like connections, not lines:
+
+- Slight curves optional
+- Soft opacity
+- Clear thickness differences
+
+====================================================
+
+Empty State
+
+Before search:
+
+- Show the search interface.
+- No graph.
+
+Error State
+
+If no relationships exist:
+
+- Show a friendly message.
+
+====================================================
+
+Architecture
+
+Keep graph completely isolated.
+
+Editor must know nothing about graph.
+
+Search must know nothing about graph rendering.
+
+Entity Browser should continue working unchanged.
+
+Reuse existing services and repositories.
+
+Do NOT invent new backend endpoints unless strictly necessary.
+
+====================================================
+
+Manual Testing
+
+Create entries containing rich relationships:
+
+- People
+- Places
+- Projects
+- Ideas
+- Tasks
+- Topics
+
+Then:
+
+- Open Memory Explorer.
+- Search an entity.
+- Select it.
+- Verify the graph loads.
+- Click a node.
+- Verify focus mode works.
+- Verify expansion works.
+- Verify weak nodes fade.
+- Hover a node.
+- Verify tooltip appears.
+- Double click a node.
+- Verify Entity Detail opens.
+- Zoom and pan.
+- Verify smoothness.
+- Reset view.
+- Verify the graph recenters.
+
+====================================================
+
+Documentation
+
+Before marking this milestone complete:
+
+1. Run:
+   - tsc --noEmit
+   - eslint .
+   - vite build
+2. Update CHANGELOG.md
+   - Append Milestone 11 using the standard template.
+3. Update the roadmap.
+   - Mark Milestone 11 — ✅ Complete
+4. Update the Project Progress section.
+5. Include this COMPLETE prompt in CHANGELOG.md exactly as received.
+
+A milestone is NOT complete until CHANGELOG.md has been updated.
+
+### Implementation Summary
+
+Polished the existing Memory Explorer into an Obsidian-inspired progressive knowledge graph without restructuring the feature. On the Rust side, enriched the `RelatedEntity` model with two new fields — `confidence` and `relationship_count` — and updated `get_related_entities` to return `e.confidence` and a subquery `COUNT(*) FROM relationships` for both the center and each related entity (no new Tauri command; the existing `get_related_entities` is reused). On the TypeScript side, updated the `RelatedEntity` type to carry `confidence` and `relationshipCount`, then rewrote `GraphCanvas.tsx` to accumulate nodes/links across successive `data` props (single long-lived D3 simulation that morphs rather than rebuilds), implement focus/dim mode (click a node to focus; non-adjacent nodes fade to ~0.18), hover highlight + tooltip (name, type, occurrences, relationships, confidence), zoom-based label reveal, smooth single-click re-centering with neighborhood expansion, fade-in for newly added entities/edges, and fade-out pruning when the 200-node cap is exceeded. Improved the force layout (charge -380, collide radius+12, link distance 110, alphaDecay 0.045, velocityDecay 0.4, gentle x/y centering) for a stable, calm settle. `MemoryExplorer.tsx` was updated so clicking any node in the accumulated graph (not just the last fetched neighborhood) loads its related data, and empty/error fetches now preserve the existing graph instead of clearing it. A `graph-edge-add` keyframe was added to `globals.css` for edge intro animation.
+
+### Files Added
+
+None (all work extends existing files within the graph feature).
+
+### Files Modified
+
+- `src/features/graph/types/index.ts` — `RelatedEntity` now carries `confidence: number` and `relationshipCount: number`
+- `src/features/graph/components/GraphCanvas.tsx` — Rewritten: single accumulating simulation with morph transitions, focus/dim mode, hover highlight + tooltip, zoom-based labels, click-to-expand, fade-in/fade-out, refined physics, Reset/Fit/Zoom controls
+- `src/features/graph/components/MemoryExplorer.tsx` — Clicked nodes load their own related data regardless of accumulated state; empty/error fetches preserve the existing graph
+- `src/shared/theme/globals.css` — Added `graph-edge-add` keyframe for edge intro animation
+- `src-tauri/src/models/mod.rs` — `RelatedEntity` struct gains `confidence: f64` and `relationship_count: i64`
+- `src-tauri/src/repositories/mod.rs` — `get_related_entities` selects `e.confidence` and a relationship-count subquery for both center and related rows
+
+### Database Changes
+
+None. No schema migration — `confidence` and `relationship_count` are computed by the existing `entities.confidence` column and a `COUNT(*)` over the existing `relationships` table; no new tables or columns.
+
+### Rust Commands
+
+None added. The existing `get_related_entities(entity_id)` is reused and now returns the enriched `RelatedEntity` shape (center + up to 50 related, each with `confidence` and `relationship_count`).
+
+### Architecture Decisions
+
+- Single long-lived D3 simulation keyed to the canvas; new `data` props merge nodes/links into existing Maps (matched by entity id) and animate in — exploration accumulates rather than resetting, mirroring Obsidian's growing web.
+- Focus/dim is purely a render-time opacity transform (adjacency computed from current link set); it does not mutate the simulation, so clearing focus is instant and lossless.
+- Importance score = normalized occurrence (40%) + normalized relationshipCount (40%) + normalized confidence (20%); size mapped via `mapRange` into a 18–48px radius range.
+- Edge thickness = `mapRange(weight, minWeight, maxWeight, 1, 6)`; brand-new edges fade in via the `graph-edge-add` keyframe, and `justAdded`/fade flags drive a requestAnimationFrame + timeout transition rather than a CSS class on SVG.
+- Cap at 200 visible nodes: when exceeded, least-important nodes (by current importance score) are moved to a transient "removing" set, opacity forced to 0, and pruned after a short timeout — giving a fade-out instead of a hard removal.
+- Hover and focus both reduce non-active node opacity (~0.18) but never unmount data; the simulation keeps running only until it settles (`alphaDecay` tuned so it calms quickly with no endless drift).
+- Tooltip reads the enriched `confidence`/`relationshipCount` from the hovered `RelatedEntity`; double-click reuses the existing `Entity Detail` navigation via the app store.
+- `MemoryExplorer` no longer looks up the clicked node inside the last-fetched response (which breaks under accumulation); it calls `getRelatedEntities(id)` directly so any node in the accumulated graph can become the new center.
+- No `invoke()` calls in components — all backend access flows through `graph-service.ts` / `search-service.ts`; no business logic placed in React components.
+
+### Verification
+
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `vite build` ✅ (230 modules, ~3s)
+- `cargo check` ✅
+
+### Notes
+
+Manual-test checklist (matches the milestone prompt): open Memory Explorer → search entity → select → graph loads; click a node → focus mode dims unrelated nodes and expands that node's connections; hover → tooltip shows name/type/occurrences/relationships/confidence and highlights neighbors; double-click → Entity Detail opens; mouse-wheel zoom (toward cursor) and background-drag pan are smooth; Reset View recenters and clears focus. The graph stabilizes without continuous movement, and the 200-node cap prunes the weakest nodes with a fade-out. Colors remain the existing per-type palette (Person #60a5fa, Place #34d399, Project #a78bfa, Idea #fbbf24, Task #fb923c, Topic #f472b6, Date #2dd4bf).
+
+### Known Limitations
+
+- Expansion is "show the selected node's one-hop neighborhood and accumulate" — it does not auto-collapse previously explored neighborhoods beyond the 200-node cap (focus mode provides the dimming alternative). This keeps exploration progressive without surprising removals.
+- Relationship strength uses co-occurrence weight + the related entity's confidence only; cross-entity confidence of the edge itself is not separately modeled (edge data is pairwise in SQLite, so a per-edge confidence would require a schema change, which this milestone deliberately avoids).
+- Node-drag is not implemented (background drag pans the canvas instead); the milestone marked drag as optional.
 
 ---
 

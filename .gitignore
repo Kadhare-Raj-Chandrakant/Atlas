@@ -6,3 +6,6 @@ src-tauri/target/
 .env
 .env.*
 *.local
+
+# Editor-specific files
+.vscode/

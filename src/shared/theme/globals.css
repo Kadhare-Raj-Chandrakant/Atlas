@@ -111,4 +111,13 @@
   }
 }
 
+@keyframes graph-edge-add {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 

@@ -4,6 +4,8 @@ export interface RelatedEntity {
   value: string
   occurrenceCount: number
   relationshipWeight: number
+  confidence: number
+  relationshipCount: number
 }
 
 export interface RelatedEntitiesResponse {

@@ -76,6 +76,8 @@ pub struct RelatedEntity {
     pub value: String,
     pub occurrence_count: i64,
     pub relationship_weight: i64,
+    pub confidence: f64,
+    pub relationship_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
