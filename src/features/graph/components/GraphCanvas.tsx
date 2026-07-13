@@ -12,7 +12,7 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force'
-import type { RelatedEntitiesResponse, RelatedEntity } from '../types'
+import type { RelatedEntitiesResponse, RelatedEntity, GlobalGraphResponse } from '../types'
 
 const ENTITY_COLORS: Record<string, string> = {
   Person: '#60a5fa',
@@ -26,7 +26,7 @@ const ENTITY_COLORS: Record<string, string> = {
 
 const RADIUS_RANGE = [18, 48]
 const WEIGHT_RANGE = [1.5, 7]
-const MAX_NODES = 200
+const MAX_NODES = 1000
 const LABEL_ZOOM = 0.8
 const DIM = 0.18
 const FADE_MS = 350
@@ -58,12 +58,13 @@ type NodeRef = string | number | SimNode
 const nodeId = (x: NodeRef): string => (typeof x === 'object' ? x.id : String(x))
 
 interface GraphCanvasProps {
-  data: RelatedEntitiesResponse
+  data?: RelatedEntitiesResponse | null
+  globalData?: GlobalGraphResponse | null
   onNodeClick: (entityId: string) => void
   onNodeDoubleClick: (entityId: string) => void
 }
 
-export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanvasProps) {
+export function GraphCanvas({ data, globalData, onNodeClick, onNodeDoubleClick }: GraphCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null)
@@ -72,11 +73,24 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
   const linksRef = useRef<Map<string, SimLink>>(new Map())
   const removingNodesRef = useRef<Map<string, SimNode>>(new Map())
   const removingLinksRef = useRef<Map<string, SimLink>>(new Map())
-  const focusRef = useRef<string>(data.center.id)
+  const focusRef = useRef<string>(data?.center?.id || globalData?.nodes[0]?.id || '')
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef<string | null>(null)
 
-  const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 })
+  const [transformState, setTransformState] = useState({ x: 0, y: 0, k: 1 })
+  const transformRef = useRef({ x: 0, y: 0, k: 1 })
+  const animRef = useRef<number | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const setTransform = useCallback((tOrFn: { x: number; y: number; k: number } | ((prev: { x: number; y: number; k: number }) => { x: number; y: number; k: number })) => {
+    setTransformState((prev) => {
+      const next = typeof tOrFn === 'function' ? tOrFn(prev) : tOrFn
+      transformRef.current = next
+      return next
+    })
+  }, [])
+
+  const transform = transformState
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; entity: RelatedEntity } | null>(null)
   const [version, setVersion] = useState(0)
@@ -85,15 +99,23 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
 
   const bump = useCallback(() => setVersion((v) => v + 1), [])
 
-  // Track viewport size.
+  // Track viewport size with ResizeObserver.
   useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
     const measure = () => {
-      const el = wrapRef.current
-      if (el) dimsRef.current = { w: el.clientWidth, h: el.clientHeight }
+      if (el.clientWidth && el.clientHeight) {
+        dimsRef.current = { w: el.clientWidth, h: el.clientHeight }
+      }
     }
     measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
   }, [])
 
   const colorFor = useCallback((type: string) => ENTITY_COLORS[type] || '#737373', [])
@@ -101,17 +123,30 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
 
   // ---- Data / neighborhood change: accumulate, morph, re-center, prune ----
   useEffect(() => {
-    const center = data.center
-    focusRef.current = center.id
+    const allEntities = globalData
+      ? globalData.nodes
+      : data
+        ? [data.center, ...data.related]
+        : []
+    if (allEntities.length === 0) return
 
-    const allEntities = [center, ...data.related]
+    if (data?.center) {
+      focusRef.current = data.center.id
+    } else if (globalData?.nodes.length && !focusRef.current) {
+      focusRef.current = globalData.nodes[0]?.id || ''
+    }
+
     const occValues = [
       ...[...nodesRef.current.values()].map((n) => n.occurrenceCount),
       ...allEntities.map((e) => e.occurrenceCount),
     ]
     const maxOcc = Math.max(...occValues, 1)
     const minOcc = Math.min(...occValues, 1)
-    const wValues = [...data.related.map((e) => e.relationshipWeight), 1]
+    const wValues = globalData
+      ? [...globalData.links.map((l) => l.weight), 1]
+      : data
+        ? [...data.related.map((e) => e.relationshipWeight), 1]
+        : [1]
     const maxW = Math.max(...wValues)
 
     const ensureNode = (e: RelatedEntity) => {
@@ -129,9 +164,9 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
           confidence: e.confidence,
           relationshipCount: e.relationshipCount,
           radius,
-          x: baseX + (Math.random() - 0.5) * 60,
-          y: baseY + (Math.random() - 0.5) * 60,
-          opacity: 0,
+          x: baseX + (Math.random() - 0.5) * 80,
+          y: baseY + (Math.random() - 0.5) * 80,
+          opacity: globalData ? 1 : 0,
           justAdded: true,
         }
         nodesRef.current.set(e.id, n)
@@ -145,18 +180,42 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
       }
     }
 
-    ensureNode(center)
-    for (const r of data.related) {
-      ensureNode(r)
-      const key = linkKey(center.id, r.id)
-      if (!linksRef.current.has(key)) {
-        linksRef.current.set(key, {
-          source: center.id,
-          target: r.id,
-          weight: r.relationshipWeight,
-          opacity: 0,
-          justAdded: true,
-        })
+    if (globalData) {
+      for (const n of globalData.nodes) {
+        ensureNode(n)
+      }
+      for (const l of globalData.links) {
+        if (nodesRef.current.has(l.source) && nodesRef.current.has(l.target)) {
+          const key = linkKey(l.source, l.target)
+          if (!linksRef.current.has(key)) {
+            linksRef.current.set(key, {
+              source: l.source,
+              target: l.target,
+              weight: l.weight,
+              opacity: globalData ? 1 : 0,
+              justAdded: true,
+            })
+          } else {
+            const existing = linksRef.current.get(key)!
+            existing.weight = l.weight
+          }
+        }
+      }
+    } else if (data) {
+      const center = data.center
+      ensureNode(center)
+      for (const r of data.related) {
+        ensureNode(r)
+        const key = linkKey(center.id, r.id)
+        if (!linksRef.current.has(key)) {
+          linksRef.current.set(key, {
+            source: center.id,
+            target: r.id,
+            weight: r.relationshipWeight,
+            opacity: 0,
+            justAdded: true,
+          })
+        }
       }
     }
 
@@ -241,7 +300,7 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
       clearTimeout(t2)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data])
+  }, [data, globalData])
 
   // ---- Click (single = re-center, double = open detail) ----
   const handleNodeClick = useCallback(
@@ -267,54 +326,41 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
     [onNodeClick, onNodeDoubleClick],
   )
 
-  // ---- Zoom ----
-  const zoomBy = useCallback((factor: number) => {
-    const { w, h } = dimsRef.current
-    setTransform((t) => {
-      const k = Math.min(Math.max(t.k * factor, 0.2), 4)
-      const cx = w / 2
-      const cy = h / 2
-      return { x: cx - (cx - t.x) * (k / t.k), y: cy - (cy - t.y) * (k / t.k), k }
-    })
+  // ---- Animation & Transition Utilities ----
+  const cancelAnimation = useCallback(() => {
+    if (animRef.current !== null) {
+      cancelAnimationFrame(animRef.current)
+      animRef.current = null
+    }
   }, [])
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault()
-    zoomBy(e.deltaY > 0 ? 0.9 : 1.1)
-  }, [zoomBy])
+  const animateTransformTo = useCallback((targetX: number, targetY: number, targetK: number, duration = 450) => {
+    cancelAnimation()
+    const start = { ...transformRef.current }
+    const startTime = performance.now()
 
-  // ---- Pan ----
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as Element
-      if (target !== svgRef.current && target.tagName !== 'svg') return
-      const startX = e.clientX
-      const startY = e.clientY
-      const start = transform
-      const move = (me: MouseEvent) => {
-        setTransform({
-          ...start,
-          x: start.x + (me.clientX - startX) / start.k,
-          y: start.y + (me.clientY - startY) / start.k,
-        })
+    const step = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const ease = 1 - Math.pow(1 - progress, 3)
+
+      const currentX = start.x + (targetX - start.x) * ease
+      const currentY = start.y + (targetY - start.y) * ease
+      const currentK = start.k + (targetK - start.k) * ease
+
+      setTransform({ x: currentX, y: currentY, k: currentK })
+
+      if (progress < 1) {
+        animRef.current = requestAnimationFrame(step)
+      } else {
+        animRef.current = null
       }
-      const up = () => {
-        window.removeEventListener('mousemove', move)
-        window.removeEventListener('mouseup', up)
-      }
-      window.addEventListener('mousemove', move)
-      window.addEventListener('mouseup', up)
-    },
-    [transform],
-  )
+    }
+
+    animRef.current = requestAnimationFrame(step)
+  }, [cancelAnimation, setTransform])
 
   // ---- Controls ----
-  const resetView = useCallback(() => {
-    const f = nodesRef.current.get(focusRef.current)
-    const { w, h } = dimsRef.current
-    setTransform(f ? { x: w / 2 - (f.x ?? 0), y: h / 2 - (f.y ?? 0), k: 1 } : { x: w / 2, y: h / 2, k: 1 })
-  }, [])
-
   const fitGraph = useCallback(() => {
     const ns = [...nodesRef.current.values()]
     if (!ns.length) return
@@ -332,7 +378,141 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
     const kk = Math.max(0.2, Math.min(k, 4))
     const cx = (minX + maxX) / 2
     const cy = (minY + maxY) / 2
-    setTransform({ x: w / 2 - cx * kk, y: h / 2 - cy * kk, k: kk })
+    animateTransformTo(w / 2 - cx * kk, h / 2 - cy * kk, kk)
+  }, [animateTransformTo])
+
+  const resetView = useCallback(() => {
+    const f = nodesRef.current.get(focusRef.current)
+    const { w, h } = dimsRef.current
+    const target = f ? { x: w / 2 - (f.x ?? 0), y: h / 2 - (f.y ?? 0), k: 1 } : { x: w / 2, y: h / 2, k: 1 }
+    animateTransformTo(target.x, target.y, target.k)
+  }, [animateTransformTo])
+
+  // ---- Zoom ----
+  const zoomAt = useCallback((factor: number, clientX?: number, clientY?: number) => {
+    cancelAnimation()
+    const rect = wrapRef.current?.getBoundingClientRect()
+    const { w, h } = dimsRef.current
+    const cx = clientX !== undefined && rect ? clientX - rect.left : w / 2
+    const cy = clientY !== undefined && rect ? clientY - rect.top : h / 2
+
+    const t = transformRef.current
+    const kNew = t.k * factor
+
+    // Automatic smooth recentering and fitting when zoomed all the way out
+    if (kNew <= 0.22 || (t.k <= 0.25 && factor < 1)) {
+      fitGraph()
+      return
+    }
+
+    const k = Math.min(kNew, 4)
+    // Dynamic coordinate transformation: keep world coordinate exactly under cursor fixed at screen (cx, cy)
+    const x = cx - (cx - t.x) * (k / t.k)
+    const y = cy - (cy - t.y) * (k / t.k)
+
+    setTransform({ x, y, k })
+  }, [cancelAnimation, fitGraph, setTransform])
+
+  const zoomBy = useCallback((factor: number) => {
+    zoomAt(factor)
+  }, [zoomAt])
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    const factor = e.deltaY > 0 ? 0.86 : 1.16
+    zoomAt(factor, e.clientX, e.clientY)
+  }, [zoomAt])
+
+  // ---- Pan ----
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as Element
+      if (target.closest('[role="button"]') || target.closest('button')) return
+      cancelAnimation()
+      setIsDragging(true)
+      const startX = e.clientX
+      const startY = e.clientY
+      const startT = { ...transformRef.current }
+      const move = (me: MouseEvent) => {
+        setTransform({
+          x: startT.x + (me.clientX - startX),
+          y: startT.y + (me.clientY - startY),
+          k: startT.k,
+        })
+      }
+      const up = () => {
+        setIsDragging(false)
+        window.removeEventListener('mousemove', move)
+        window.removeEventListener('mouseup', up)
+      }
+      window.addEventListener('mousemove', move)
+      window.addEventListener('mouseup', up)
+    },
+    [cancelAnimation, setTransform],
+  )
+
+  // ---- Touch Gestures ----
+  const touchStartRef = useRef<{ touches: { x: number; y: number }[]; startT: { x: number; y: number; k: number }; dist?: number; mid?: { x: number; y: number } } | null>(null)
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const target = e.target as Element
+    if (target.closest('[role="button"]') || target.closest('button')) return
+    cancelAnimation()
+    const touches = Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }))
+    const startT = { ...transformRef.current }
+    if (touches.length === 1) {
+      touchStartRef.current = { touches, startT }
+    } else if (touches.length === 2) {
+      const dx = touches[1].x - touches[0].x
+      const dy = touches[1].y - touches[0].y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      const mid = { x: (touches[0].x + touches[1].x) / 2, y: (touches[0].y + touches[1].y) / 2 }
+      touchStartRef.current = { touches, startT, dist, mid }
+    }
+  }, [cancelAnimation])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return
+    const touches = Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }))
+    const { startT, dist: startDist, mid: startMid, touches: origTouches } = touchStartRef.current
+
+    if (touches.length === 1 && origTouches.length === 1) {
+      setTransform({
+        x: startT.x + (touches[0].x - origTouches[0].x),
+        y: startT.y + (touches[0].y - origTouches[0].y),
+        k: startT.k,
+      })
+    } else if (touches.length === 2 && startDist && startMid) {
+      const dx = touches[1].x - touches[0].x
+      const dy = touches[1].y - touches[0].y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      const mid = { x: (touches[0].x + touches[1].x) / 2, y: (touches[0].y + touches[1].y) / 2 }
+
+      const factor = dist / (startDist || 1)
+      const kNew = startT.k * factor
+
+      if (kNew <= 0.22) {
+        fitGraph()
+        touchStartRef.current = null
+        return
+      }
+
+      const k = Math.min(kNew, 4)
+      const rect = wrapRef.current?.getBoundingClientRect()
+      const cx = rect ? startMid.x - rect.left : dimsRef.current.w / 2
+      const cy = rect ? startMid.y - rect.top : dimsRef.current.h / 2
+
+      const panX = mid.x - startMid.x
+      const panY = mid.y - startMid.y
+      const x = cx - (cx - startT.x) * (k / startT.k) + panX
+      const y = cy - (cy - startT.y) * (k / startT.k) + panY
+
+      setTransform({ x, y, k })
+    }
+  }, [fitGraph, setTransform])
+
+  const handleTouchEnd = useCallback(() => {
+    touchStartRef.current = null
   }, [])
 
   // ---- Hover / tooltip ----
@@ -372,49 +552,96 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
   const activeId = hoverId ?? focusRef.current
   const activeNeighbors = adjacency.get(activeId) ?? new Set<string>()
 
-  const isVisible = (id: string) => id === activeId || activeNeighbors.has(id)
+  const isVisible = (id: string) => {
+    if (hoverId !== null) return id === hoverId || activeNeighbors.has(id)
+    if (globalData) return true
+    return id === activeId || activeNeighbors.has(id)
+  }
 
   const maxWeight = Math.max(...links.map((l) => l.weight), 1)
   const minWeight = Math.min(...links.map((l) => l.weight), 1)
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
-      <div className="absolute right-4 top-4 z-10 flex gap-1.5">
-        <ControlButton label="Reset View" onClick={resetView} />
-        <ControlButton label="Fit Graph" onClick={fitGraph} />
-        <ControlButton label="Zoom In" onClick={() => zoomBy(1.2)} />
-        <ControlButton label="Zoom Out" onClick={() => zoomBy(0.8)} />
+    <div ref={wrapRef} className="flex flex-1 h-full w-full relative overflow-hidden">
+      {/* Node Count Indicator at Bottom-Left */}
+      <div className="absolute bottom-6 left-6 z-20 flex items-center gap-2 rounded-full border border-neutral-800/80 bg-neutral-900/85 px-3.5 py-1.5 text-xs font-medium text-neutral-400 shadow-xl backdrop-blur-md">
+        <span className="h-2 w-2 rounded-full bg-primary-500 animate-pulse" />
+        <span>{nodes.length} {nodes.length === 1 ? 'dot' : 'dots'} connected</span>
+      </div>
+
+      {/* Obsidian-Style Zoom & Navigation Dock at Bottom-Right */}
+      <div className="absolute bottom-6 right-6 z-20 flex items-center gap-1.5 rounded-2xl border border-neutral-800/80 bg-neutral-900/90 p-2 shadow-2xl backdrop-blur-md">
+        <button
+          type="button"
+          onClick={() => zoomBy(1.35)}
+          title="Zoom In"
+          aria-label="Zoom In"
+          className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-800/60 text-xl font-bold text-neutral-100 transition-all hover:bg-neutral-700 hover:text-white active:scale-95 shadow-sm"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(0.74)}
+          title="Zoom Out"
+          aria-label="Zoom Out"
+          className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-800/60 text-xl font-bold text-neutral-100 transition-all hover:bg-neutral-700 hover:text-white active:scale-95 shadow-sm"
+        >
+          −
+        </button>
+        <div className="mx-1 h-6 w-px bg-neutral-800" />
+        <button
+          type="button"
+          onClick={fitGraph}
+          title="Fit Graph to Screen"
+          aria-label="Fit Graph to Screen"
+          className="rounded-xl px-3.5 py-2 text-xs font-semibold text-neutral-300 transition-all hover:bg-neutral-800 hover:text-white active:scale-95"
+        >
+          Fit
+        </button>
+        <button
+          type="button"
+          onClick={resetView}
+          title="Reset Center"
+          aria-label="Reset Center"
+          className="rounded-xl px-3.5 py-2 text-xs font-semibold text-neutral-300 transition-all hover:bg-neutral-800 hover:text-white active:scale-95"
+        >
+          Reset
+        </button>
       </div>
 
       {tooltip && (
         <div
           role="tooltip"
-          className="pointer-events-none absolute z-20 w-52 rounded-lg border border-neutral-800 bg-neutral-900/95 px-3 py-2 text-xs shadow-xl"
+          className="pointer-events-none absolute z-50 w-60 rounded-xl border border-white/15 bg-neutral-950/70 p-3.5 text-xs shadow-[0_16px_40px_rgba(0,0,0,0.85)] backdrop-blur-xl ring-1 ring-white/15"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-2.5 flex items-center gap-2.5 border-b border-white/10 pb-2">
             <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
+              className="inline-block h-3 w-3 shrink-0 rounded-full shadow-sm ring-1 ring-white/20"
               style={{ backgroundColor: colorFor(tooltip.entity.entityType) }}
             />
-            <span className="font-medium text-neutral-100">{tooltip.entity.value}</span>
+            <span className="text-sm font-bold tracking-tight text-white">{tooltip.entity.value}</span>
           </div>
-          <dl className="space-y-0.5 text-neutral-400">
+          <dl className="space-y-1 text-neutral-300">
             <Row label="Type" value={tooltip.entity.entityType} />
             <Row label="Occurrences" value={String(tooltip.entity.occurrenceCount)} />
             <Row label="Relationships" value={String(tooltip.entity.relationshipCount)} />
-            <Row label="Confidence" value={tooltip.entity.confidence.toFixed(2)} />
+            <Row label="Confidence" value={`${Math.round(tooltip.entity.confidence * 100)}%`} />
           </dl>
         </div>
       )}
 
       <svg
         ref={svgRef}
-        className="h-full w-full cursor-grab"
+        className={`h-full w-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         role="img"
-        aria-label={`Knowledge graph centered on ${data.center.value} with ${data.related.length} related entities`}
+        aria-label={data?.center ? `Knowledge graph centered on ${data.center.value} with ${data.related.length} related entities` : globalData ? `Global Knowledge Graph with ${globalData.nodes.length} entities` : 'Knowledge graph'}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.k})`}>
           {links.map((link, i) => {
@@ -541,24 +768,12 @@ export function GraphCanvas({ data, onNodeClick, onNodeDoubleClick }: GraphCanva
   )
 }
 
-function ControlButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200"
-    >
-      {label}
-    </button>
-  )
-}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
-      <dt>{label}</dt>
-      <dd className="text-neutral-200">{value}</dd>
+    <div className="flex justify-between gap-3 py-0.5 border-b border-white/10 last:border-0">
+      <dt className="text-neutral-300 font-medium">{label}</dt>
+      <dd className="text-white font-semibold">{value}</dd>
     </div>
   )
 }

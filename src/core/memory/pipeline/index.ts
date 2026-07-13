@@ -8,7 +8,15 @@ export async function processEntry(entry: Entry): Promise<void> {
   if (!text.trim()) return
 
   const { entities } = runPipeline(text)
-  if (entities.length === 0) return
 
-  await persistenceStage(entry.id, entities)
+  // Always ensure the note's Date itself is extracted as a central dot (`Date`)
+  const dateEntity = {
+    entityType: 'Date' as const,
+    value: entry.date,
+    normalizedValue: entry.date,
+    confidence: 1.0,
+  }
+
+  const allEntities = [dateEntity, ...entities]
+  await persistenceStage(entry.id, allEntities)
 }

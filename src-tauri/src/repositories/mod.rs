@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail, EntrySearchResult, EntitySearchResult, SearchResults, RelatedEntity, RelatedEntitiesResponse, MemoryInsights, EntityInsightItem, EntryInsightItem, DayActivity, RelationshipInsightItem};
+use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail, EntrySearchResult, EntitySearchResult, SearchResults, RelatedEntity, RelatedEntitiesResponse, GlobalGraphResponse, GraphLinkData, MemoryInsights, EntityInsightItem, EntryInsightItem, DayActivity, RelationshipInsightItem};
 
 pub fn upsert_entry(conn: &Connection, entry: &Entry) -> rusqlite::Result<()> {
     conn.execute(
@@ -350,6 +350,53 @@ pub fn get_related_entities(
     }
 
     Ok(Some(RelatedEntitiesResponse { center, related }))
+}
+
+pub fn get_global_graph(conn: &Connection) -> rusqlite::Result<GlobalGraphResponse> {
+    let mut nodes_stmt = conn.prepare(
+        "SELECT e.id, e.entity_type, e.value, COUNT(ee.entry_id) AS occurrence_count,
+                0 AS relationship_weight, e.confidence,
+                (SELECT COUNT(*) FROM relationships r WHERE r.entity_a_id = e.id OR r.entity_b_id = e.id) AS relationship_count
+         FROM entities e
+         LEFT JOIN entry_entities ee ON ee.entity_id = e.id
+         GROUP BY e.id
+         ORDER BY occurrence_count DESC, e.confidence DESC
+         LIMIT 1000",
+    )?;
+    let node_rows = nodes_stmt.query_map([], |row| {
+        Ok(RelatedEntity {
+            id: row.get(0)?,
+            entity_type: row.get(1)?,
+            value: row.get(2)?,
+            occurrence_count: row.get(3)?,
+            relationship_weight: row.get(4)?,
+            confidence: row.get(5)?,
+            relationship_count: row.get(6)?,
+        })
+    })?;
+
+    let mut nodes = Vec::new();
+    for row in node_rows {
+        nodes.push(row?);
+    }
+
+    let mut links_stmt = conn.prepare(
+        "SELECT entity_a_id, entity_b_id, weight FROM relationships ORDER BY weight DESC LIMIT 3000"
+    )?;
+    let link_rows = links_stmt.query_map([], |row| {
+        Ok(GraphLinkData {
+            source: row.get(0)?,
+            target: row.get(1)?,
+            weight: row.get(2)?,
+        })
+    })?;
+
+    let mut links = Vec::new();
+    for row in link_rows {
+        links.push(row?);
+    }
+
+    Ok(GlobalGraphResponse { nodes, links })
 }
 
 fn parse_date(s: &str) -> (i32, u32, u32) {

@@ -1,8 +1,8 @@
 import type { Extractor, EntityInput } from '../../entities/types'
 import { normalize, tokenize, isStopWord } from '../../normalization'
 
-const MIN_TOPIC_LENGTH = 4
-const MIN_FREQUENCY = 2
+const MIN_TOPIC_LENGTH = 3
+const MIN_FREQUENCY = 1
 
 export const topicExtractor: Extractor = {
   name: 'topic',

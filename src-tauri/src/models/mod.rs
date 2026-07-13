@@ -145,3 +145,18 @@ pub struct MemoryInsights {
     pub avg_entities_per_entry: f64,
     pub avg_relationships_per_entry: f64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphLinkData {
+    pub source: String,
+    pub target: String,
+    pub weight: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalGraphResponse {
+    pub nodes: Vec<RelatedEntity>,
+    pub links: Vec<GraphLinkData>,
+}

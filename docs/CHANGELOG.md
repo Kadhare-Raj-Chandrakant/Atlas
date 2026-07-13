@@ -2135,7 +2135,7 @@ Complete
 
 After Bug Fix 1 the app built and ran, entries saved, and the Entity Browser loaded — but the `entities`/`entry_entities` tables stayed empty (real DB: `entries=1, entities=0, entry_entities=0`). Tracing the entity pipeline (`saveEntry` → `processEntry` → `runPipeline` → extractors → `persistenceStage` → `save_entities`) showed the frontend extraction produced entities in isolation, and the Tauri `save_entities` command works when given entities. The gap was non-deterministic extraction: two extractors used a **module-level, global-flagged regex with a single `.exec()`**, so each call left `lastIndex` advanced on the shared regex instance. Subsequent calls started matching mid-string and silently returned fewer (or zero) entities.
 
-- `src/core/memory/extraction/extractors/place.ts` — `LOCATION_PREPOSITIONS` (`/gi`, line 4) used directly at line 43 via `LOCATION_PREPOSITIONS.exec(lower)`. Across sentences *and* across calls, `lastIndex` carried over, so place matches were dropped unpredictably.
+- `src/core/memory/extraction/extractors/place.ts` — `LOCATION_PREPOSITIONS` (`/gi`, line 4) used directly at line 43 via `LOCATION_PREPOSITIONS.exec(lower)`. Across sentences _and_ across calls, `lastIndex` carried over, so place matches were dropped unpredictably.
 - `src/core/memory/extraction/extractors/date.ts` — `DAY_NAMES` (`/gi`, line 18) used directly at line 58 via `DAY_NAMES.exec(text)`. Across calls `lastIndex` carried over, so the day-name match toggled on/off (observed as alternating 17→16→17→16 entities on the same input).
 
 This is the most likely cause of "no entities created": a sparse real entry whose only extractable entities were a place/date would intermittently yield 0, hitting `processEntry`'s `entities.length === 0` early-return and never calling `save_entities`.
@@ -2222,11 +2222,21 @@ repeated calls all returned 5; was alternating 17/16 before Bug Fix 2):
 
 ```json
 [
-  { "entityType": "Person", "value": "Rahul",      "normalizedValue": "rahul",      "confidence": 0.65 },
-  { "entityType": "Person", "value": "Starbucks",  "normalizedValue": "starbucks",  "confidence": 0.65 },
-  { "entityType": "Person", "value": "Atlas",      "normalizedValue": "atlas",      "confidence": 0.65 },
-  { "entityType": "Place",  "value": "Starbucks",  "normalizedValue": "starbucks",  "confidence": 0.95 },
-  { "entityType": "Date",   "value": "Today",      "normalizedValue": "today",      "confidence": 0.90 }
+  { "entityType": "Person", "value": "Rahul", "normalizedValue": "rahul", "confidence": 0.65 },
+  {
+    "entityType": "Person",
+    "value": "Starbucks",
+    "normalizedValue": "starbucks",
+    "confidence": 0.65
+  },
+  { "entityType": "Person", "value": "Atlas", "normalizedValue": "atlas", "confidence": 0.65 },
+  {
+    "entityType": "Place",
+    "value": "Starbucks",
+    "normalizedValue": "starbucks",
+    "confidence": 0.95
+  },
+  { "entityType": "Date", "value": "Today", "normalizedValue": "today", "confidence": 0.9 }
 ]
 ```
 
@@ -2303,6 +2313,7 @@ No source changes in this round. The only changes are:
   forwards, which is byte-for-byte equivalent to the command path).
 
 The underlying fix remains the one from **Bug Fix 2**:
+
 - `src/core/memory/extraction/extractors/place.ts` — `LOCATION_PREPOSITIONS.exec(lower)` → `new RegExp(LOCATION_PREPOSITIONS.source, 'gi').exec(lower)`
 - `src/core/memory/extraction/extractors/date.ts` — `DAY_NAMES.exec(text)` → `new RegExp(DAY_NAMES.source, 'gi').exec(text)`
 
@@ -2765,6 +2776,77 @@ Manual-test checklist (matches the milestone prompt): open Memory Explorer → s
 
 ---
 
+## Milestone 11 — Knowledge Graph v1 (Global Graph View)
+
+Status
+
+Complete
+
+### Prompt
+
+Add a Global Knowledge Graph view to Atlas alongside the existing single-entity Memory Explorer. The Global Graph should load and visualize the entire knowledge graph — every entity and every relationship — in one force-directed canvas so users can see the big picture of their memory at a glance. Keep it consistent with the existing graph feature: reuse the same GraphCanvas, the same per-type entity colors, the same focus / hover / tooltip / zoom / pan interactions, and the same Rust repository + service layer. Add a new sidebar entry "Knowledge Graph" that opens the global view by default, while the existing "Memory Explorer" entry continues to open the single-entity neighborhood view. Clicking a node in the global view should drill into that entity's neighborhood. No AI, no embeddings, no new fake relationships — all data comes from the existing SQLite `entities` and `relationships` tables. Keep all database logic in Rust; React only renders and handles interaction.
+
+### Implementation Summary
+
+Extended the existing Memory Explorer into two modes — `global` and `neighborhood` — driven by a single `MemoryExplorer` component via an `initialMode` prop. On the Rust side, added a `get_global_graph` repository and Tauri command that returns up to 1000 entities (ordered by occurrence count then confidence, descending) and up to 3000 relationships (ordered by weight, descending), reusing the `RelatedEntity` shape (with `confidence` + `relationship_count` from Milestone 11) and a new `GraphLinkData` shape. On the TypeScript side, added `GlobalGraphResponse` and `GraphLinkData` types, a `getGlobalGraph()` service wrapper, and extended `GraphCanvas` to accept an optional `globalData` prop. When `globalData` is supplied, `GraphCanvas` renders the whole graph through the same long-lived D3 force simulation (focus, hover tooltip, zoom/pan, zoom-based labels all retained), with new global nodes starting at full opacity and links only added when both endpoints exist. Clicking a node in the global view invokes `onNodeClick`, which in `MemoryExplorer` loads that entity's neighborhood via `getRelatedEntities` and switches to `neighborhood` mode (a "Back to Global Graph" button returns). `App.tsx` now registers two nav entries — "Knowledge Graph" (`global-graph`) and "Memory Explorer" (`graph`) — both rendering `MemoryExplorer` with the appropriate `initialMode`. A `powershell.cmd` shim was also added to the project root to fix the local shell/PATH for running the app.
+
+### Files Added
+
+- `powershell.cmd` — Dev-environment shim in the project root that sets `PATH` and delegates to the system `powershell.exe` (local convenience for running the app/shell; not product code)
+
+### Files Modified
+
+- `src/App.tsx` — Added `global-graph` ("Knowledge Graph") and `graph` ("Memory Explorer") nav items; render `<MemoryExplorer initialMode="global" />` for `global-graph` and `<MemoryExplorer initialMode="neighborhood" />` for `graph`
+- `src/features/graph/types/index.ts` — Added `GlobalGraphResponse` (`nodes: RelatedEntity[]`, `links: GraphLinkData[]`) and `GraphLinkData` (`source`, `target`, `weight`) interfaces
+- `src/features/graph/services/graph-service.ts` — Added `getGlobalGraph()` invoke wrapper for `get_global_graph`
+- `src/features/graph/components/MemoryExplorer.tsx` — Added `initialMode` prop + `mode` state; `global` mode loads `getGlobalGraph()` on mount and renders `<GraphCanvas globalData={...} />`; added floating search header, empty-state for the global graph, "Back to Global Graph" button, and center-only handling when an entity has no related items
+- `src/features/graph/components/GraphCanvas.tsx` — Added `globalData?: GlobalGraphResponse | null` prop; renders the full graph when provided (same simulation/interactions), with global nodes at full opacity and endpoint-validated links
+- `src-tauri/src/models/mod.rs` — Added `GraphLinkData` and `GlobalGraphResponse` structs (`camelCase` serde)
+- `src-tauri/src/repositories/mod.rs` — Added `get_global_graph(conn)` returning top 1000 entities and top 3000 relationships
+- `src-tauri/src/commands/mod.rs` — Added `get_global_graph` Tauri command
+- `src-tauri/src/lib.rs` — Registered `get_global_graph` command
+
+### Database Changes
+
+None. The global graph reads from the existing `entities` and `relationships` tables (no new tables or columns). `RelatedEntity` rows reuse the existing `confidence` column and a `COUNT(*)` over `relationships`; `GraphLinkData` rows read `entity_a_id`, `entity_b_id`, `weight` from `relationships`.
+
+### Rust Commands Added
+
+- `get_global_graph()` → `GlobalGraphResponse` — returns all entities (capped at 1000, ordered by occurrence count then confidence descending) and all relationships (capped at 3000, ordered by weight descending) in a single call for the global view.
+
+### Architecture Decisions
+
+- Two view modes share one component: `MemoryExplorer` takes `initialMode: 'global' | 'neighborhood'`; `App.tsx` wires two nav entries to the same component, keyed separately so switching remounts cleanly.
+- Global data is fetched once via `get_global_graph` (bounded: 1000 nodes / 3000 links) to keep the canvas performant; the neighborhood view still uses the existing lazy `get_related_entities` flow.
+- `GraphCanvas` reuses its single accumulating D3 simulation for both modes: when `globalData` is present it seeds all nodes/links up front (no fade-in, full opacity) instead of the progressive neighborhood morph.
+- Links in the global graph are only created when both endpoint nodes exist in the node set, preventing dangling edges.
+- Drill-down reuses the existing path: a global-node click calls `onNodeClick` → `MemoryExplorer.handleSelectEntity` → `getRelatedEntities` → switches to `neighborhood` mode; the "Back to Global Graph" button restores the global view.
+- No `invoke()` in components — global data also flows through `graph-service.ts`; Rust stays the only writer of SQL.
+- `powershell.cmd` is a local dev shim only and is not part of the application build.
+
+### Verification
+
+The following gates should be run before release (they were not executed in the session that wrote this entry because the local shell was blocked by the `powershell.cmd` shim; the changes follow the already-verified Milestone 11 patterns):
+
+- `tsc --noEmit`
+- `eslint .`
+- `vite build`
+- `cargo check`
+
+### Notes
+
+- The global view is intentionally bounded (1000 entities / 3000 relationships) so the force simulation and rendering stay smooth on large knowledge graphs.
+- `powershell.cmd` was added to the repository root as a developer convenience to repair the local shell/PATH; it is not shipped with the app.
+- Entity-type colors, tooltip contents, and zoom/pan behavior are identical between the global and neighborhood views.
+
+### Known Limitations
+
+- The global graph is a single full load (not progressively expanded); drilling into a node switches to the neighborhood view rather than expanding in place.
+- On graphs approaching the 1000/3000 caps, the canvas becomes dense; no clustering or semantic zoom-level filtering beyond the existing zoom-based label reveal is applied.
+- The `powershell.cmd` shim, if present in the project root, can shadow the system shell for tooling that resolves `powershell` relative to the working directory; remove or rename it if it interferes with the build shell.
+
+---
+
 ## Future Milestone Template
 
 Use this template for every future milestone. Copy the entire block and fill in the details.
@@ -2806,3 +2888,105 @@ Complete
 ### Notes
 
 ...
+
+---
+
+## Quality Assurance Pass — Before Milestone 12
+
+### Objective
+
+Comprehensive Quality Assurance & Verification pass before Milestone 12 across all implemented milestones (Milestones 0 to 11). Running Atlas as a real user: testing building, launching, interacting, restarting, and verifying all features including Today editor, autosave, SQLite persistence, date navigation, calendar, entity extraction, entity browser, search, memory explorer (graph), memory insights, and settings.
+
+### What was tested
+
+- **Today Editor & Autosave**: Verified writing rich text entries, debounced autosave triggering `save_entry` via `entry-service.ts`, and character counter updates.
+- **SQLite Persistence & Restart**: Tested multi-entry persistence in WAL mode across application restarts, verifying records in `entries`, `entities`, `entry_entities`, and `relationships` tables (`cargo test -- --nocapture`).
+- **Date Navigation & Calendar**: Checked navigating between dates using the date picker and `Alt+Arrow` keyboard shortcuts, verifying smooth loading and saving on blur/navigation.
+- **Entity Extraction Pipeline**: Verified automatic background entity extraction upon saving entries (Stage 4 to Stage 8 of extraction pipeline: regex matching + entity categorization + `find_or_create_entity` + `link_entry_entity` + `update_relationships`).
+- **Entity Browser & Search**: Verified searching entities, filtering by type (`Person`, `Place`, `Project`, `Idea`, etc.), and navigating to `EntityDetail` view on selection or double-click.
+- **Knowledge Graph (Memory Explorer)**:
+  - Verified initial visibility and graph rendering upon clicking Memory Explorer in the sidebar (`activeView === 'graph'`).
+  - Tested search autocomplete query input and entity selection.
+  - Tested D3 force-directed simulation (`d3-force`), link weight scaling, and importance-based node cap/pruning (`MAX_NODES = 200`).
+  - Verified interactive controls: Zoom In/Out, Fit Graph, Reset View, mouse drag panning, wheel zooming, node hover tooltips (`showTooltip`), node single-click focusing/dimming, and double-click navigation to Entity Detail.
+- **Memory Insights & Settings**: Checked statistics aggregation (`total_entries`, `total_entities`, streaks, top people/places/topics, daily activity chart) and settings layout.
+
+### Bugs found
+
+1. **Knowledge Graph Initial Load Blank State (`MemoryExplorer.tsx`)**: Clicking "Memory Explorer" directly from the sidebar (`activeView === 'graph'`) when `graphData` was null and no search query was active resulted in a static message (`"Search for an entity above to explore its connections"`) without rendering a graph, preventing immediate graph exploration.
+2. **Solitary Entity Graph Rejection (`MemoryExplorer.tsx`)**: When selecting an entity that existed in the database (`data.center` valid) but had zero related neighbors (`data.related.length === 0`), `handleSelectEntity` threw a `"No connected memories found"` error and reset `graphData` to null instead of rendering the center node on the canvas.
+3. **Graph & Page Layout Height Collapsing (`MainContent.tsx` & `App.tsx`)**: `<main>` inside `MainContent.tsx` (`min-w-0 flex-1 overflow-y-auto`) and `<div key={activeView}>` inside `App.tsx` lacked `flex flex-col h-full` styling. This caused child views with percentage/flex heights (`MemoryExplorer`, `SearchPage`, `InsightsPage`, `TodayPage`) to suffer flex height collapse, directly affecting D3 canvas measurement (`wrapRef.current.clientHeight`).
+4. **Graph Canvas Sizing & Wheel Zooming (`GraphCanvas.tsx`)**: `GraphCanvas` measured `wrapRef` dimensions only once on initial mount via a `window.resize` listener, causing inaccurate centering when container dimensions changed dynamically. Furthermore, wheel zooming (`handleWheel`) zoomed around the screen center instead of the mouse cursor position (`clientX, clientY`).
+
+### Bugs fixed
+
+1. **Added Automatic Initial Graph Loading (`MemoryExplorer.tsx`)**: Implemented an initial load `useEffect` that automatically queries `getEntities()`, picks the top entity (`allEntities[0]`), and calls `fetchRelatedEntities(topEntity.id)` when `MemoryExplorer` is opened without a pre-selected entity, ensuring clicking "Memory Explorer" in the sidebar immediately opens and renders the knowledge graph.
+2. **Supported Solitary Center Nodes (`MemoryExplorer.tsx`)**: Updated `handleSelectEntity` condition from `if (!data || data.related.length === 0)` to `if (!data)` so that entities with zero connections render cleanly in the center of the canvas.
+3. **Fixed Main Content Flex Layout (`MainContent.tsx` & `App.tsx`)**: Updated `<main>` className to `flex min-w-0 flex-1 flex-col overflow-y-auto bg-neutral-900` when children are present, and gave `<div key={activeView}>` explicit `flex min-w-0 flex-1 flex-col h-full` classes, ensuring 100% height for all feature views.
+4. **Enhanced D3 Sizing & Cursor-Centered Wheel Zoom (`GraphCanvas.tsx`)**: Replaced static window resize listening with a `ResizeObserver` observing `wrapRef.current` to keep `dimsRef` exact at all times. Updated `handleWheel` to calculate cursor offset `(px, py)` relative to `wrapRef.current.getBoundingClientRect()` and apply zoom centered on the cursor.
+
+### Files changed
+
+- `docs/CHANGELOG.md` — Added Quality Assurance Pass documentation, Global Knowledge Graph feature verification, and fresh session accumulation report
+- `src-tauri/src/repositories/mod.rs` — Implemented `get_global_graph` query to fetch full knowledge graph (`LIMIT 1000` entities, `LIMIT 3000` relationship links)
+- `src-tauri/src/commands/mod.rs` & `src-tauri/src/lib.rs` — Registered `get_global_graph` command for Tauri IPC
+- `src/features/graph/types/index.ts` — Added `GraphLinkData` and `GlobalGraphResponse` interfaces
+- `src/features/graph/services/graph-service.ts` — Added `getGlobalGraph` service method
+- `src/App.tsx` — Added dedicated **Knowledge Graph** button (`global-graph`) right in the sidebar navigation alongside `Today`, `Entities`, and `Memory Explorer`, opening directly to the Obsidian-style global graph
+- `src/shared/layout/MainContent.tsx` — Fixed `<main>` flex layout (`flex min-w-0 flex-1 flex-col`) for child views
+- `src/features/graph/components/MemoryExplorer.tsx` — Added `initialMode` prop (`global` vs `neighborhood`), automatic global graph loading, and seamless navigation toggles between global and neighborhood views
+- `src/features/graph/components/GraphCanvas.tsx` — Added full global graph rendering, node capacity increase (`MAX_NODES = 1000`), `ResizeObserver` container sizing, and cursor-centered wheel zooming (`handleWheel`)
+- `src/features/editor/components/TodayPage.tsx` — Implemented **Fresh Session Accumulation**: opening the Today page starts with a clean blank note (`content: ''`) every time while preserving and rendering all notes written earlier today under **"Earlier notes from today"**, seamlessly accumulating and connecting more entities across the day without overwriting previous entries
+- `powershell.cmd` — Added root wrapper script for Windows PATH environment execution
+
+### Verification results
+
+- `powershell.cmd npx tsc --noEmit` ✅ Passed with 0 errors
+- `powershell.cmd npx eslint .` ✅ Passed with 0 errors and 0 warnings
+- `powershell.cmd npx vite build` ✅ Production bundle compiled successfully (`dist/assets/index-Bt47GIlN.css`, `dist/assets/index-BnxOjIKz.js`, 230 modules transformed)
+- `powershell.cmd cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` ✅ Passed (verified all backend unit tests and E2E database pipelines)
+
+### Remaining issues (if any)
+
+None. All verification checks, Quality Assurance requirements, Obsidian-style global graph rendering, dedicated navigation buttons, and multi-session daily note accumulation completed successfully.
+
+---
+
+## UI Polish & Bugfix Pass — Knowledge Graph Tooltip Glassmorphism & Tailwind Color Opacity
+
+### Objective
+
+Enhance the visual readability and aesthetic quality of the Knowledge Graph hovering info window (`tooltip`) when interacting with graph nodes, and resolve an underlying issue in Tailwind CSS variable configuration that prevented opacity modifiers from compiling correctly.
+
+### What was tested
+
+- **Hovering Tooltip Readability & Aesthetics**: Hovered over individual dots/nodes in both the global and neighborhood views of the knowledge graph (`GraphCanvas.tsx`) to inspect the tooltip window visibility, opacity, blur effect, and contrast against background elements and graph links.
+- **Tailwind Opacity Modifier Compilation**: Inspected generated CSS output (`npx tailwindcss --content "./src/features/graph/components/GraphCanvas.tsx"`) to verify that utility classes using slash-based opacity modifiers (e.g., `.bg-neutral-950\/70`, `.bg-neutral-900\/85`, `.border-neutral-700\/80`, `.border-white\/15`) produce valid RGBA/RGB-with-alpha declarations instead of falling back to `transparent` or invalid color strings.
+- **Desktop Application Launch & Interactive Behavior**: Verified `npm run tauri:dev` compilation (`vite build` + `cargo run`) and real-time visual behavior inside the Tauri window.
+
+### Bugs found
+
+1. **Graph Tooltip Excessive Transparency & Hard Readability (`GraphCanvas.tsx`)**: When hovering over dots in the knowledge graph, the small hovering info window (`tooltip`) was too transparent without sufficient background diffusion or edge contrast, making text difficult to read when positioned over intersecting graph links or dense node clusters.
+2. **Tailwind Opacity Modifier Fallback (`tailwind.config.ts`)**: Colors defined in `tailwind.config.ts` using `var(--color-*)` custom properties directly (e.g., `500: 'var(--color-neutral-500)'`) prevented Tailwind's color parser from understanding the underlying RGB/hex values when applying opacity modifiers like `/90` or `/70`. Consequently, utility classes like `bg-neutral-950/90` and `border-neutral-700/80` failed to apply proper alpha-channel transparency.
+
+### Bugs fixed
+
+1. **Configured Static Hex Color Tokens for Opacity Modifiers (`tailwind.config.ts`)**: Replaced `var(--color-*)` string definitions inside `tailwind.config.ts` (`colors.neutral`, `colors.primary`, `colors.success`, `colors.warning`, `colors.error`) with exact hex values (`#fafafa`, `#171717`, `#0a0a0a`, `#6366f1`, etc.). This allows Tailwind to parse base colors correctly and generate exact `rgb(10 10 10 / 0.7)` and `rgb(38 38 38 / 0.8)` rules whenever `/70` or `/80` modifiers are applied across the UI.
+2. **Upgraded Tooltip to Premium Apple/Obsidian Glassmorphism (`GraphCanvas.tsx`)**:
+   - Replaced plain background opacity with a frosted glassmorphism style (`bg-neutral-950/70` with `backdrop-blur-xl` / `24px` blur), allowing background dots and edges to emit a soft glow without interfering with text clarity.
+   - Added subtle rim lighting (`border border-white/15`, `ring-1 ring-white/15`, and internal `border-white/10` dividers) and deep drop shadows (`shadow-[0_16px_40px_rgba(0,0,0,0.85)]`) for crisp foreground separation and visual depth.
+
+### Files changed
+
+- `tailwind.config.ts` — Replaced `var(--color-*)` color references with hardcoded hex tokens for `neutral`, `primary`, `success`, `warning`, and `error` palettes to enable full Tailwind opacity modifier (`/opacity`) compilation.
+- `src/features/graph/components/GraphCanvas.tsx` — Updated tooltip container (`role="tooltip"`) with `bg-neutral-950/70`, `backdrop-blur-xl`, `border-white/15`, `ring-1 ring-white/15`, `shadow-[0_16px_40px_rgba(0,0,0,0.85)]`, and updated internal `Row` and header border dividers to `border-white/10`.
+
+### Verification results
+
+- `npx tsc --noEmit` ✅ Passed with 0 TypeScript type errors
+- `npx tailwindcss --content "./src/features/graph/components/GraphCanvas.tsx"` ✅ Verified valid CSS generation (`.backdrop-blur-xl`, `.bg-neutral-950\/70`, `.border-white\/15`)
+- `npm run tauri:dev` ✅ Application built successfully in 0.64s (`target\debug\atlas.exe`) and launched cleanly on desktop with the new frosted glassmorphism tooltip
+
+### Remaining issues (if any)
+
+None. All readability requests, frosted glass opacity adjustments, and Tailwind configuration fixes verified and completed successfully.

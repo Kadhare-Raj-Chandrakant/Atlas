@@ -12,7 +12,8 @@ import './features/editor/styles/editor.css'
 const topNavItems = [
   { id: 'today', icon: 'journal' as const, label: 'Today' },
   { id: 'entities', icon: 'entity' as const, label: 'Entities' },
-  { id: 'graph', icon: 'graph' as const, label: 'Memory Explorer' },
+  { id: 'global-graph', icon: 'graph' as const, label: 'Knowledge Graph' },
+  { id: 'graph', icon: 'search' as const, label: 'Memory Explorer' },
   { id: 'insights', icon: 'chart' as const, label: 'Memory Insights' },
   { id: 'search', icon: 'search' as const, label: 'Search' },
 ]
@@ -22,6 +23,7 @@ const PAGE_TRANSITIONS: Record<string, string> = {
   'entities': 'animate-fade-in',
   'entity-detail': 'animate-fade-in',
   'search': 'animate-fade-in',
+  'global-graph': 'animate-fade-in',
   'graph': 'animate-fade-in',
   'insights': 'animate-fade-in',
   'settings': 'animate-fade-in',
@@ -71,7 +73,7 @@ export function App() {
           </div>
         </Sidebar>
         <MainContent>
-          <div key={activeView} className={PAGE_TRANSITIONS[activeView] || 'animate-fade-in'}>
+          <div key={activeView} className={`flex flex-1 flex-col h-full w-full overflow-y-auto ${PAGE_TRANSITIONS[activeView] || 'animate-fade-in'}`}>
             {activeView === 'today' && (
               <TodayPage key={`today-${params.date || 'now'}`} initialDate={params.date} />
             )}
@@ -80,7 +82,8 @@ export function App() {
               <EntityDetail entityId={params.entityId || ''} />
             )}
             {activeView === 'search' && <SearchPage />}
-            {activeView === 'graph' && <MemoryExplorer />}
+            {activeView === 'global-graph' && <MemoryExplorer key="global-graph" initialMode="global" />}
+            {activeView === 'graph' && <MemoryExplorer key="memory-explorer" initialMode="neighborhood" />}
             {activeView === 'insights' && <InsightsPage />}
             {activeView === 'settings' && (
               <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-6 py-8">

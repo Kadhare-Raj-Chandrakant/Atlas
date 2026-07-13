@@ -28,6 +28,7 @@ pub fn run() {
             commands::get_entity_detail,
             commands::search_all,
             commands::get_related_entities,
+            commands::get_global_graph,
             commands::get_memory_insights,
         ])
         .run(tauri::generate_context!())

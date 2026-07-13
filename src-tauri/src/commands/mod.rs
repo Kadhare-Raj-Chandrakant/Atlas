@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::database::connection::Database;
-use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail, SearchResults, RelatedEntitiesResponse, MemoryInsights};
+use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail, SearchResults, RelatedEntitiesResponse, GlobalGraphResponse, MemoryInsights};
 
 #[tauri::command]
 pub fn save_entry(state: State<Database>, entry: Entry) -> Result<(), String> {
@@ -64,6 +64,12 @@ pub fn get_related_entities(
 ) -> Result<Option<RelatedEntitiesResponse>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     crate::repositories::get_related_entities(&conn, &entity_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_global_graph(state: State<Database>) -> Result<GlobalGraphResponse, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::get_global_graph(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -7,7 +7,7 @@ interface MainContentProps {
 
 export function MainContent({ children }: MainContentProps) {
   if (children) {
-    return <main className="min-w-0 flex-1 overflow-y-auto bg-neutral-900">{children}</main>
+    return <main className="min-w-0 flex flex-1 flex-col overflow-hidden bg-neutral-900 relative">{children}</main>
   }
 
   return (

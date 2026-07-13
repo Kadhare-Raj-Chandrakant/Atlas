@@ -30,3 +30,14 @@ export interface GraphLink {
   target: string
   weight: number
 }
+
+export interface GraphLinkData {
+  source: string
+  target: string
+  weight: number
+}
+
+export interface GlobalGraphResponse {
+  nodes: RelatedEntity[]
+  links: GraphLinkData[]
+}

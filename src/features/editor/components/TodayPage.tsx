@@ -40,24 +40,31 @@ export function TodayPage({ initialDate }: TodayPageProps) {
   const todayStr = initialDate || new Date().toISOString().split('T')[0]
   const [currentDate, setCurrentDate] = useState(todayStr)
   const [entry, setEntry] = useState<Entry | null>(null)
+  const [previousNotesHtml, setPreviousNotesHtml] = useState<string | null>(null)
   const [charCount, setCharCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const currentDateRef = useRef(currentDate)
   currentDateRef.current = currentDate
+  const initialDayContentRef = useRef<string | null>(null)
 
   const { markDirty, saveNow, isSaving, lastSaved } = useAutosave({
     onSave: useCallback(
       async (content: string) => {
         if (!entry) return
+        if (!content.trim() && !initialDayContentRef.current) return
         const now = new Date().toISOString()
+        const combinedContent = initialDayContentRef.current && initialDayContentRef.current.trim() !== ''
+          ? `${initialDayContentRef.current}<hr class="my-6 border-neutral-800" />${content}`
+          : content
+
         await saveEntry({
           ...entry,
-          content,
-          metadata: { ...entry.metadata, updatedAt: now, charCount },
+          content: combinedContent,
+          metadata: { ...entry.metadata, updatedAt: now, charCount: combinedContent.length },
         })
       },
-      [entry, charCount],
+      [entry],
     ),
   })
 
@@ -66,10 +73,16 @@ export function TodayPage({ initialDate }: TodayPageProps) {
     setError(null)
     loadEntryByDate(currentDate)
       .then((existing) => {
-        if (existing) {
-          setEntry(existing)
-          setCharCount(existing.metadata.charCount)
+        if (existing && existing.content && existing.content.trim() !== '') {
+          initialDayContentRef.current = existing.content
+          setPreviousNotesHtml(existing.content)
+          const newEntry = createEntryForDate(currentDate)
+          newEntry.id = existing.id
+          setEntry(newEntry)
+          setCharCount(0)
         } else {
+          initialDayContentRef.current = null
+          setPreviousNotesHtml(null)
           setEntry(createEntryForDate(currentDate))
           setCharCount(0)
         }
@@ -77,6 +90,8 @@ export function TodayPage({ initialDate }: TodayPageProps) {
       .catch((err) => {
         console.error('TodayPage error:', err)
         setError(`Failed to load entry: ${String(err)}`)
+        initialDayContentRef.current = null
+        setPreviousNotesHtml(null)
         setEntry(createEntryForDate(currentDate))
       })
       .finally(() => setLoading(false))
@@ -156,6 +171,19 @@ export function TodayPage({ initialDate }: TodayPageProps) {
 
       <div key={currentDate} className="mt-8 flex-1 animate-fade-in-up">
         <Editor content={entry!.content} onUpdate={handleEditorUpdate} />
+
+        {previousNotesHtml && (
+          <div className="mt-10 border-t border-neutral-800/80 pt-6">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              <Icon name="journal" size={14} className="text-primary-400" />
+              <span>Earlier notes from today ({new Date(currentDate + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})</span>
+            </div>
+            <div
+              className="prose prose-invert max-w-none text-sm text-neutral-400 opacity-85 space-y-2"
+              dangerouslySetInnerHTML={{ __html: previousNotesHtml }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="mt-4 shrink-0">
