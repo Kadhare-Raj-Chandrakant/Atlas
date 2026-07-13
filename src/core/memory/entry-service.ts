@@ -38,6 +38,8 @@ export async function getDatesWithEntries(
 export async function loadEntryByDate(date: string): Promise<Entry | null> {
   const result = await invoke<EntryPayload | null>('load_entry_by_date', { date })
   if (!result) return null
+  const charCount = result.contentText.length
+  const wordCount = result.contentText ? result.contentText.trim().split(/\s+/).length : 0
   return {
     id: result.id,
     date: result.date,
@@ -46,8 +48,8 @@ export async function loadEntryByDate(date: string): Promise<Entry | null> {
       id: result.id,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,
-      wordCount: 0,
-      charCount: result.contentText.length,
+      wordCount,
+      charCount,
     },
   }
 }

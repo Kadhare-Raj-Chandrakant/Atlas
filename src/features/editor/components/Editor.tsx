@@ -58,6 +58,9 @@ export function Editor({ content, onUpdate }: EditorProps) {
     <EditorContent
       editor={editor}
       className="w-full"
+      aria-label="Journal editor"
+      role="textbox"
+      aria-multiline="true"
     />
   )
 }

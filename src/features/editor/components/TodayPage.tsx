@@ -8,6 +8,7 @@ import { useAutosave } from '../hooks/useAutosave'
 import { Editor } from './Editor'
 import { EditorFooter } from './EditorFooter'
 import { DateNavigation } from './DateNavigation'
+import { Icon } from '@/shared/ui'
 
 function createEntryForDate(dateStr: string): Entry {
   const now = new Date()
@@ -40,6 +41,8 @@ export function TodayPage({ initialDate }: TodayPageProps) {
   const [currentDate, setCurrentDate] = useState(todayStr)
   const [entry, setEntry] = useState<Entry | null>(null)
   const [charCount, setCharCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const currentDateRef = useRef(currentDate)
   currentDateRef.current = currentDate
 
@@ -59,15 +62,24 @@ export function TodayPage({ initialDate }: TodayPageProps) {
   })
 
   useEffect(() => {
-    loadEntryByDate(currentDate).then((existing) => {
-      if (existing) {
-        setEntry(existing)
-        setCharCount(existing.metadata.charCount)
-      } else {
+    setLoading(true)
+    setError(null)
+    loadEntryByDate(currentDate)
+      .then((existing) => {
+        if (existing) {
+          setEntry(existing)
+          setCharCount(existing.metadata.charCount)
+        } else {
+          setEntry(createEntryForDate(currentDate))
+          setCharCount(0)
+        }
+      })
+      .catch((err) => {
+        console.error('TodayPage error:', err)
+        setError(`Failed to load entry: ${String(err)}`)
         setEntry(createEntryForDate(currentDate))
-        setCharCount(0)
-      }
-    })
+      })
+      .finally(() => setLoading(false))
   }, [currentDate])
 
   const navigateToDate = useCallback(
@@ -106,8 +118,21 @@ export function TodayPage({ initialDate }: TodayPageProps) {
     [markDirty],
   )
 
-  if (!entry) {
-    return null
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Icon name="journal" size={24} className="animate-pulse text-neutral-700" />
+      </div>
+    )
+  }
+
+  if (error && !entry) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+        <p className="text-sm text-neutral-600">{error}</p>
+        <p className="text-xs text-neutral-700">Start writing a new entry for today.</p>
+      </div>
+    )
   }
 
   return (
@@ -130,7 +155,7 @@ export function TodayPage({ initialDate }: TodayPageProps) {
       </div>
 
       <div key={currentDate} className="mt-8 flex-1 animate-fade-in-up">
-        <Editor content={entry.content} onUpdate={handleEditorUpdate} />
+        <Editor content={entry!.content} onUpdate={handleEditorUpdate} />
       </div>
 
       <div className="mt-4 shrink-0">

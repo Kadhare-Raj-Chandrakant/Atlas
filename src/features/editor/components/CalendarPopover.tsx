@@ -147,6 +147,8 @@ export function CalendarPopover({
                     `${viewYear}-${pad(viewMonth)}-${pad(day)}`,
                   )
                 }
+                aria-label={`${monthName} ${day}${hasEntryDay ? ', has entries' : ''}`}
+                aria-selected={selected}
                 className={`
                   relative flex items-center justify-center rounded-md py-1.5 text-sm
                   transition-colors duration-150

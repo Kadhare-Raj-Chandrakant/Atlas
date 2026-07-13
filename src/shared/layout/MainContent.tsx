@@ -7,11 +7,11 @@ interface MainContentProps {
 
 export function MainContent({ children }: MainContentProps) {
   if (children) {
-    return <main className="flex-1 overflow-y-auto bg-neutral-900">{children}</main>
+    return <main className="min-w-0 flex-1 overflow-y-auto bg-neutral-900">{children}</main>
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center bg-neutral-900">
+    <main className="min-w-0 flex flex-1 items-center justify-center bg-neutral-900">
       <div className="flex flex-col items-center gap-6 px-4 text-center">
         <div className="animate-fade-in">
           <Logo

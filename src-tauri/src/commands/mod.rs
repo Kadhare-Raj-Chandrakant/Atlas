@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::database::connection::Database;
-use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail};
+use crate::models::{Entry, EntityInput, EntitySummary, EntityDetail, SearchResults, RelatedEntitiesResponse, MemoryInsights};
 
 #[tauri::command]
 pub fn save_entry(state: State<Database>, entry: Entry) -> Result<(), String> {
@@ -28,6 +28,7 @@ pub fn save_entities(
         crate::repositories::link_entry_entity(&conn, &entry_id, &entity_id)
             .map_err(|e| e.to_string())?;
     }
+    crate::repositories::update_relationships(&conn, &entry_id).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -48,6 +49,27 @@ pub fn get_entities(
 ) -> Result<Vec<EntitySummary>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     crate::repositories::get_entities(&conn, query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn search_all(state: State<Database>, query: String) -> Result<SearchResults, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::search_all(&conn, &query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_related_entities(
+    state: State<Database>,
+    entity_id: String,
+) -> Result<Option<RelatedEntitiesResponse>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::get_related_entities(&conn, &entity_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_memory_insights(state: State<Database>) -> Result<MemoryInsights, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::get_memory_insights(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -40,7 +40,7 @@ export const placeExtractor: Extractor = {
     const sentences = getSentences(text)
     for (const sentence of sentences) {
       const lower = sentence.toLowerCase()
-      const prepMatch = LOCATION_PREPOSITIONS.exec(lower)
+      const prepMatch = new RegExp(LOCATION_PREPOSITIONS.source, 'gi').exec(lower)
       if (!prepMatch) continue
 
       const afterPrep = sentence.slice(prepMatch.index + prepMatch[0].length).trim()

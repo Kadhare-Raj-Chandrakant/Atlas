@@ -72,6 +72,9 @@ export function DateNavigation({
       <button
         type="button"
         onClick={() => setCalendarOpen(!calendarOpen)}
+        aria-label="Open calendar"
+        aria-expanded={calendarOpen}
+        aria-haspopup="dialog"
         className="rounded-md px-2 py-1 text-sm font-medium tracking-wide text-neutral-400 transition-colors duration-150 hover:bg-neutral-800 hover:text-neutral-200"
       >
         {formatDateHeader(currentDate)}

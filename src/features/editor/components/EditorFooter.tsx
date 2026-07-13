@@ -44,7 +44,7 @@ export function EditorFooter({
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" role="status" aria-live="polite">
         {isSaving && (
           <span className="text-xs text-neutral-500">Saving...</span>
         )}

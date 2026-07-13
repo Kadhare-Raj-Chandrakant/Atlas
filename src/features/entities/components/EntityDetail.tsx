@@ -19,10 +19,20 @@ function formatDate(dateStr: string): string {
 
 export function EntityDetail({ entityId }: EntityDetailProps) {
   const [detail, setDetail] = useState<EntityDetailType | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const navigate = useAppStore((s) => s.navigate)
 
   useEffect(() => {
-    getEntityDetail(entityId).then(setDetail)
+    setLoading(true)
+    setError(null)
+    getEntityDetail(entityId)
+      .then(setDetail)
+      .catch((err) => {
+        console.error('EntityDetail error:', err)
+        setError(`Failed to load entity details: ${String(err)}`)
+      })
+      .finally(() => setLoading(false))
   }, [entityId])
 
   const handleEntryClick = useCallback(
@@ -36,10 +46,18 @@ export function EntityDetail({ entityId }: EntityDetailProps) {
     navigate('entities')
   }, [navigate])
 
-  if (!detail) {
+  if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-neutral-600">Loading...</p>
+        <p className="text-sm text-neutral-500">Loading...</p>
+      </div>
+    )
+  }
+
+  if (error || !detail) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-neutral-600">{error || 'Entity not found.'}</p>
       </div>
     )
   }

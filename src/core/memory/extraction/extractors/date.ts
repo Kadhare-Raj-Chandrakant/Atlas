@@ -55,7 +55,7 @@ export const dateExtractor: Extractor = {
       }
     }
 
-    const dayMatch = DAY_NAMES.exec(text)
+    const dayMatch = new RegExp(DAY_NAMES.source, 'gi').exec(text)
     if (dayMatch) {
       const value = dayMatch[0].trim()
       const key = normalize(value)
