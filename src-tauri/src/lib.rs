@@ -30,6 +30,9 @@ pub fn run() {
             commands::get_related_entities,
             commands::get_global_graph,
             commands::get_memory_insights,
+            commands::find_entries_between_dates,
+            commands::find_recent_entries,
+            commands::find_entries_by_entity_name,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

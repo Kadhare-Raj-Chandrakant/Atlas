@@ -44,6 +44,20 @@ const icons = {
       'M4 20h16M4 20V4m0 16l4-8 4 4 4-8 4 4',
     ],
   },
+  sync: {
+    viewBox: '0 0 24 24',
+    paths: [
+      'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+    ],
+  },
+  check: {
+    viewBox: '0 0 24 24',
+    paths: ['M5 13l4 4L19 7'],
+  },
+  x: {
+    viewBox: '0 0 24 24',
+    paths: ['M6 18L18 6M6 6l12 12'],
+  },
 } as const
 
 export type IconName = keyof typeof icons

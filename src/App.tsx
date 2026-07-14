@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { AppShell, Sidebar, TopBar, MainContent, SidebarItem } from './shared/layout'
 import { Logo, Icon } from './shared/ui'
 import { TodayPage } from './features/editor'
@@ -6,6 +6,9 @@ import { EntityBrowser, EntityDetail } from './features/entities'
 import { SearchPage } from './features/search'
 import { MemoryExplorer } from './features/graph'
 import { InsightsPage } from './features/insights'
+import { AssistantPanel } from './features/assistant'
+import { AISettings } from './features/ai'
+import { useAIStore } from './features/ai/hooks/useAIStore'
 import { useAppStore } from './shared/store/app-store'
 import './features/editor/styles/editor.css'
 
@@ -31,6 +34,7 @@ const PAGE_TRANSITIONS: Record<string, string> = {
 
 export function App() {
   const { activeView, params, navigate } = useAppStore()
+  const initAI = useAIStore((s) => s.init)
 
   const handleNavClick = useCallback(
     (id: string) => {
@@ -38,6 +42,10 @@ export function App() {
     },
     [navigate],
   )
+
+  useEffect(() => {
+    void initAI()
+  }, [initAI])
 
   return (
     <AppShell>
@@ -86,24 +94,26 @@ export function App() {
             {activeView === 'graph' && <MemoryExplorer key="memory-explorer" initialMode="neighborhood" />}
             {activeView === 'insights' && <InsightsPage />}
             {activeView === 'settings' && (
-              <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-6 py-8">
-                <div className="space-y-4 text-center">
+              <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-8 px-6 py-8">
+                <div>
                   <h1 className="text-2xl font-semibold tracking-tight text-neutral-100">
                     Settings
                   </h1>
-                  <p className="text-sm text-neutral-600">
+                  <p className="mt-1 text-sm text-neutral-600">
                     Atlas runs entirely locally with no cloud dependency.
                   </p>
-                  <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 px-6 py-4 text-left text-sm text-neutral-400">
+                  <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/50 px-6 py-4 text-sm text-neutral-400">
                     <p>Version: 1.0.0</p>
                     <p className="mt-1">Database: SQLite (local)</p>
                     <p className="mt-1">All data stays on your device.</p>
                   </div>
                 </div>
+                <AISettings />
               </div>
             )}
           </div>
         </MainContent>
+        <AssistantPanel />
       </div>
     </AppShell>
   )

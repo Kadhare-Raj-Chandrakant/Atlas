@@ -648,3 +648,90 @@ pub fn find_dates_in_month(
     }
     Ok(dates)
 }
+
+pub fn find_entries_between_dates(
+    conn: &Connection,
+    from_date: &str,
+    to_date: &str,
+) -> rusqlite::Result<Vec<Entry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, created_at, updated_at, date, title, content_html, content_text
+         FROM entries WHERE date >= ?1 AND date <= ?2
+         ORDER BY date DESC",
+    )?;
+    let rows = stmt.query_map(params![from_date, to_date], |row| {
+        Ok(Entry {
+            id: row.get(0)?,
+            created_at: row.get(1)?,
+            updated_at: row.get(2)?,
+            date: row.get(3)?,
+            title: row.get(4)?,
+            content_html: row.get(5)?,
+            content_text: row.get(6)?,
+        })
+    })?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+pub fn find_recent_entries(
+    conn: &Connection,
+    days: i64,
+) -> rusqlite::Result<Vec<Entry>> {
+    let offset = format!("-{} days", days);
+    let mut stmt = conn.prepare(
+        "SELECT id, created_at, updated_at, date, title, content_html, content_text
+         FROM entries WHERE date >= date('now', ?1)
+         ORDER BY date DESC",
+    )?;
+    let rows = stmt.query_map(params![offset], |row| {
+        Ok(Entry {
+            id: row.get(0)?,
+            created_at: row.get(1)?,
+            updated_at: row.get(2)?,
+            date: row.get(3)?,
+            title: row.get(4)?,
+            content_html: row.get(5)?,
+            content_text: row.get(6)?,
+        })
+    })?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+pub fn find_entries_by_entity_name(
+    conn: &Connection,
+    entity_name: &str,
+) -> rusqlite::Result<Vec<Entry>> {
+    let pattern = format!("%{}%", entity_name);
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT e.id, e.created_at, e.updated_at, e.date, e.title, e.content_html, e.content_text
+         FROM entries e
+         INNER JOIN entry_entities ee ON ee.entry_id = e.id
+         INNER JOIN entities ent ON ent.id = ee.entity_id
+         WHERE ent.value LIKE ?1 OR ent.normalized_value LIKE ?1
+         ORDER BY e.date DESC",
+    )?;
+    let rows = stmt.query_map(params![pattern], |row| {
+        Ok(Entry {
+            id: row.get(0)?,
+            created_at: row.get(1)?,
+            updated_at: row.get(2)?,
+            date: row.get(3)?,
+            title: row.get(4)?,
+            content_html: row.get(5)?,
+            content_text: row.get(6)?,
+        })
+    })?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}

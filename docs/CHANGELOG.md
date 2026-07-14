@@ -2,9 +2,9 @@
 
 **Version:** v1.0 Development
 
-**Progress:** 11 / 11 Milestones Complete
+**Progress:** 15 / 15 Milestones Complete
 
-**Current Milestone:** Milestone 11 — Knowledge Graph v1 (Release Candidate)
+**Current Milestone:** Milestone 15 — Local AI Conversations (RAG v1)
 
 **Next Milestone:** (none — all milestones complete)
 
@@ -28,6 +28,10 @@ Atlas is a local-first desktop application that automatically builds a connected
 - Milestone 9 — Memory Insights ✅
 - Milestone 10 — Polish & User Experience ✅
 - Milestone 11 — Knowledge Graph v1 ✅ Complete
+- Milestone 12 — Atlas AI (Memory Recall) ✅ Complete
+- Milestone 13 — Conversational Intelligence ✅ Complete
+- Milestone 14 — AI Provider System (Local-First) ✅ Complete
+- Milestone 15 — Local AI Conversations (RAG v1) ✅ Complete
 
 ## Documentation Rules
 
@@ -42,6 +46,7 @@ Atlas is a local-first desktop application that automatically builds a connected
 - Store architecture decisions.
 - Store verification results.
 - Keep the roadmap synchronized.
+- `docs/AI_SPEC.md` (permanent architecture & development rules) and `docs/PROJECT_STATE.md` (current state, rewritten each milestone) are now the primary context files for future development.
 
 ---
 
@@ -2081,13 +2086,14 @@ Manual test results verify: every page opens correctly with no console errors. K
 
 ## Build Status (current)
 
-| Check          | Result           |
-| -------------- | ---------------- |
-| `tsc --noEmit` | ✅               |
-| `eslint .`     | ✅               |
-| `vite build`   | ✅ (230 modules) |
+| Check          | Result            |
+| -------------- | ----------------- |
+| `cargo check`  | ✅                |
+| `tsc --noEmit` | ✅                |
+| `eslint .`     | ✅                |
+| `vite build`   | ✅ (255 modules)  |
 
-> **Note:** Rust code requires a Rust toolchain to compile. Run `cargo check` locally. TypeScript and Vite build pass in all environments. Milestone 10 focused exclusively on UX polish, accessibility, and code quality — no new features or database schema changes.
+> **Note:** TypeScript, ESLint, and Vite build pass in all environments. Rust code requires a Rust toolchain to compile. Milestone 12 adds the Atlas AI Memory Recall feature — a rule-based memory retrieval assistant with a resizable right-side panel, no LLM dependency.
 
 ---
 
@@ -2990,3 +2996,429 @@ Enhance the visual readability and aesthetic quality of the Knowledge Graph hove
 ### Remaining issues (if any)
 
 None. All readability requests, frosted glass opacity adjustments, and Tailwind configuration fixes verified and completed successfully.
+
+---
+
+## Milestone 12 — Atlas AI (Memory Recall)
+
+Status
+
+Complete
+
+### Prompt
+
+(This prompt)
+(Full milestone prompt stored in conversation history)
+
+### Implementation Summary
+
+Built the first version of Atlas AI — a memory retrieval companion that answers questions exclusively from the SQLite database without hallucinations. On the Rust side, added three new repository functions (`find_entries_between_dates`, `find_recent_entries`, `find_entries_by_entity_name`) and their corresponding Tauri commands, all returning full `Entry` rows. On the TypeScript side, created a dedicated `features/assistant/` module with: typed retrieval service (`retrieval-service.ts`) exposing `findEntryByDate`, `findEntriesBetweenDates`, `findRecentEntries`, `findEntriesByEntity`, and `findEntriesByKeyword` (via existing search); a query interpreter (`query-interpreter.ts`) that uses regex patterns to classify natural language queries into date, entity, date-range, recent, or keyword types — no LLM required; a response formatter (`response-formatter.ts`) that renders retrieved entries as natural-language answers with citation sources; a Zustand store (`useAssistantStore.ts`) managing messages, panel open state, and resizable width with localStorage persistence; and UI components (`AssistantPanel`, `ChatMessage`, `ChatInput`) matching Atlas' dark, elegant, glassmorphism visual language. The assistant panel is a permanent right-side panel integrated into `App.tsx`, resizable between 320px and 45% of window width, with collapsed state support. Enter sends, Shift+Enter adds a new line. Each assistant response includes citations with "Open Entry" buttons that navigate TodayPage to the source date. Future LLM integration can replace only the query interpretation and response formatting steps while leaving the retrieval layer unchanged.
+
+### Files Added
+
+- `src/features/assistant/types/index.ts` — Message, Citation, QueryType interfaces
+- `src/features/assistant/services/retrieval-service.ts` — Typed invoke wrappers for 5 retrieval operations
+- `src/features/assistant/services/query-interpreter.ts` — Natural language query parser using regex patterns
+- `src/features/assistant/services/response-formatter.ts` — Formats retrieval results into natural-language answers with citations
+- `src/features/assistant/services/assistant-service.ts` — Orchestrates query → retrieve → format pipeline
+- `src/features/assistant/services/search-keyword.ts` — Keyword search via existing search_all command
+- `src/features/assistant/hooks/useAssistantStore.ts` — Zustand store for messages, panel state, width persistence
+- `src/features/assistant/components/AssistantPanel.tsx` — Right-side resizable panel with drag handle, collapsed state
+- `src/features/assistant/components/ChatMessage.tsx` — Message bubble with role label, timestamp, citations, Open Entry button
+- `src/features/assistant/components/ChatInput.tsx` — Auto-resizing textarea with Enter-to-send, Shift+Enter newline
+- `src/features/assistant/index.ts` — Assistant feature barrel export
+
+### Files Modified
+
+- `src/App.tsx` — Added AssistantPanel import and rendered as right-side sibling to MainContent
+- `src-tauri/src/repositories/mod.rs` — Added find_entries_between_dates, find_recent_entries, find_entries_by_entity_name repository functions
+- `src-tauri/src/commands/mod.rs` — Added three corresponding Tauri commands
+- `src-tauri/src/lib.rs` — Registered the three new commands in the invoke handler
+- `docs/CHANGELOG.md` — Updated progress to 12/12, added Milestone 12 section, updated roadmap
+
+### Rust Commands Added
+
+- `find_entries_between_dates(from_date, to_date)` → `Vec<Entry>` — returns all entries in date range
+- `find_recent_entries(days)` → `Vec<Entry>` — returns entries from last N days
+- `find_entries_by_entity_name(entity_name)` → `Vec<Entry>` — returns entries linked to entities matching name
+
+### Architecture Decisions
+
+- **Retrieval layer isolation**: The UI never executes SQL. The assistant panel never knows database details. All retrieval goes through a typed service layer that wraps Tauri invoke calls.
+- **Query interpreter is replaceable**: The current interpreter uses regex patterns to classify queries. A future LLM can replace `query-interpreter.ts` and `response-formatter.ts` without touching the retrieval layer or database.
+- **Panel is additive**: The assistant panel sits to the right of MainContent as a sibling in the flex layout. It does not modify, wrap, or intercept any existing component (editor, search, graph, etc.).
+- **Width persistence**: Panel width is stored in localStorage keyed by `atlas-assistant-panel-width`, clamped between 320px and 45% of window width, restored on launch.
+- **Collapsed state**: When closed, the panel collapses to a thin vertical button with "Atlas AI" label. Open state is tracked in Zustand but not persisted (could be added later).
+- **No LLM dependency**: All query interpretation and response generation is purely rule-based. The retrieval layer is designed so that only the reasoning step (interpretation + formatting) needs replacement when an LLM is added.
+- **Citations are embedded**: Every assistant response includes a `citations` array with source dates. "Open Entry" buttons call `navigate('today', { date })` to navigate TodayPage to that date.
+- **Message storage**: Messages are held in Zustand memory and are ephemeral (not persisted to SQLite). This keeps the assistant stateless and avoids coupling with the entry model.
+
+### Verification
+
+- `cargo check` ✅
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `vite build` ✅ (241 modules, up from 230)
+
+### Notes
+
+Manual test checklist (matches the milestone prompt):
+• Ask "What happened on June 20?" → Atlas retrieves the entry for that date, shows the content with a citation, and offers an "Open Entry" button.
+• Ask "Show me everything about Rahul" → Atlas searches entities matching "Rahul", retrieves all linked entries, and lists them with summaries and citations.
+• Ask "What projects did I discuss this month?" → Atlas computes the current month's date range, retrieves entries, and formats the results.
+• Ask "What happened yesterday?" → Atlas computes yesterday's date and retrieves the entry.
+• Ask "Show recent entries" → Atlas retrieves the most recent entries.
+• Click "Open Entry" → TodayPage navigates to that date.
+• Restart Atlas → panel width is restored from localStorage.
+• Resize the panel by dragging the left edge → width updates and persists.
+• Collapse the panel → it becomes a thin vertical button; click to re-open.
+
+All operations return data from SQLite only — no hallucinations, no fabricated memories.
+
+---
+
+## Memory Engine Refinements & Graph UX Improvements
+
+### Status
+
+Complete
+
+### Summary
+
+Refined the memory engine for broader entity extraction, enhanced the TodayPage with fresh session accumulation, and overhauled the GraphCanvas with smooth animations, touch support, cursor-centered zoom, ResizeObserver-based sizing, and a refined control dock.
+
+### Changes
+
+#### Memory Engine Refinements
+
+- **Topic extractor thresholds loosened** (`topic.ts`): `MIN_TOPIC_LENGTH` reduced from 4 → 3, `MIN_FREQUENCY` reduced from 2 → 1. Produces more topics from shorter text and catches topics mentioned only once.
+- **Automatic Date entity injection** (`pipeline/index.ts`): Every entry now always generates a `Date` entity matching the entry's date (confidence 1.0). Ensures every entry is always connected to at least the date it was written, preventing isolated entries in the knowledge graph. Previously, entries whose text yielded zero extractable entities would produce no entities at all — now they always produce at minimum a Date entity.
+
+#### TodayPage — Fresh Session Accumulation
+
+- When opening the Today page for a date that already has content, the existing entry content is rendered as **"Earlier notes from today"** below a blank editor, separated by a `<hr>` divider. The user edits a fresh blank note; on save, the old content is prepended with an `<hr>` separator. This allows multiple writing sessions per day without overwriting or manually merging.
+
+#### GraphCanvas — Interaction & Visual Overhaul
+
+- **ResizeObserver-based sizing**: Replaced `window.resize` listener with a `ResizeObserver` on the container element for accurate canvas dimensions on initial render and dynamic layout changes.
+- **Cursor-centered wheel zoom**: `handleWheel` now uses `e.clientX`/`e.clientY` relative to the container's bounding rect, zooming toward the cursor position instead of the screen center.
+- **Smooth animated transitions**: Added `animateTransformTo` — cubic ease-out interpolation for pan/zoom via `requestAnimationFrame`, replacing instant `setTransform` jumps. Used by `fitGraph`, `resetView`, and zoom controls.
+- **Touch gesture support**: Added `handleTouchStart`/`handleTouchMove`/`handleTouchEnd` handlers supporting single-finger pan and two-finger pinch-to-zoom with smooth coordinate transforms.
+- **Obsidian-style control dock**: Replaced the top-right button bar with a bottom-right dock (`rounded-2xl`, `backdrop-blur-md`, `bg-neutral-900/90` border) containing Zoom In (+), Zoom Out (−), Fit, and Reset buttons with hover/active states.
+- **Node count indicator**: Added a bottom-left pill showing live count of rendered nodes with a pulsing dot.
+- **Glassmorphism tooltip**: Tooltip upgraded to frosted glass (`bg-neutral-950/70`, `backdrop-blur-xl`, `border-white/15`, `ring-1 ring-white/15`, deep shadow) with bold typography.
+- **Improved pan behavior**: Pan no longer scales delta by `1/k`, fixing jittery cursor-follow at high zoom levels. Added `isDragging` state for `cursor-grab`/`cursor-grabbing` toggle.
+- **Global graph rendering**: `GraphCanvas` accepts optional `globalData` prop for rendering the full knowledge graph (up to 1000 nodes, 3000 links). Global nodes start at full opacity; links validated to exist in the node set.
+
+#### MemoryExplorer — Global & Neighborhood Modes
+
+- Added `initialMode` prop (`'global' | 'neighborhood'`). Global mode calls `getGlobalGraph()` on mount and renders via `globalData` prop. Neighborhood mode behaves as before (search → select → fetch related).
+- "Back to Global Graph" button shown in neighborhood mode when navigated from a global node click.
+- Solitary entities (zero relationships) now render centered on the canvas instead of throwing "No connected memories found".
+
+#### App.tsx — Dual Graph Navigation
+
+- Two sidebar nav items: "Knowledge Graph" (`global-graph`, opens global view) and "Memory Explorer" (`graph`, opens neighborhood view).
+- View container div now has `flex flex-1 flex-col h-full w-full overflow-y-auto` for proper height propagation.
+
+#### MainContent Layout Fix
+
+- Changed `<main>` from `overflow-y-auto` to `overflow-hidden` with `flex flex-col` to prevent layout collapse for height-dependent children (graph canvas, etc.).
+
+#### Tailwind Config — Hardcoded Hex Colors
+
+- Replaced all `var(--color-*)` references with hardcoded hex values for `neutral`, `primary`, `success`, `warning`, and `error` palettes, enabling correct Tailwind opacity modifier compilation (`/70`, `/80`, etc.) across the entire UI.
+
+### Files Modified
+
+- `src/core/memory/extraction/extractors/topic.ts` — Loosened thresholds for broader topic extraction
+- `src/core/memory/pipeline/index.ts` — Automatic Date entity injection on every entry
+- `src/features/editor/components/TodayPage.tsx` — Fresh session accumulation with earlier notes display
+- `src/features/graph/components/GraphCanvas.tsx` — ResizeObserver, touch gestures, cursor zoom, smooth animation, new controls, glassmorphism tooltip, global graph rendering
+- `src/features/graph/components/MemoryExplorer.tsx` — initialMode prop, global/neighborhood modes, Back to Global Graph button
+- `src/features/graph/types/index.ts` — Added `GraphLinkData`, `GlobalGraphResponse` interfaces
+- `src/features/graph/services/graph-service.ts` — Added `getGlobalGraph` service wrapper
+- `src-tauri/src/commands/mod.rs` — Added `get_global_graph` command
+- `src-tauri/src/lib.rs` — Registered `get_global_graph` command
+- `src-tauri/src/models/mod.rs` — Added `GraphLinkData`, `GlobalGraphResponse` structs
+- `src-tauri/src/repositories/mod.rs` — Added `get_global_graph` repository (1000 nodes, 3000 links)
+- `src/App.tsx` — Dual sidebar nav items (Knowledge Graph + Memory Explorer), flex layout fix
+- `src/shared/layout/MainContent.tsx` — Layout fix for height-dependent children
+- `tailwind.config.ts` — Hardcoded hex colors for opacity modifier support
+- `.opencode/opencode.json` — Added shell config
+
+### Verification
+
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `vite build` ✅ (230 modules)
+- `cargo check` ✅
+
+---
+
+## Milestone 13 — Conversational Intelligence
+
+### Status
+
+Complete
+
+### Prompt
+
+The current assistant works as a retrieval engine but still feels robotic.
+
+The goal of this milestone is to make Atlas feel like a calm personal space rather than a search tool.
+
+Do NOT change the retrieval system.
+
+Instead build a conversation layer that decides HOW Atlas should respond before retrieval happens.
+
+(Full milestone prompt stored above in the conversation flow, intent definitions, response guidelines, and personality rules — see the user's original Milestone 13 specification.)
+
+### Implementation Summary
+
+Built a conversational intelligence layer on top of the existing retrieval engine without modifying any retrieval code. Created three new files and refactored one:
+
+**responses.ts** — Central conversation assets file grouping all response text by intent. Includes rotating greeting responses (5 variants), small talk (4), gratitude (4), farewell (5), writing help prompts (8), reflection no-results messages (3), and unknown intent responses (4). Rotation uses a per-intent counter (not random) so responses cycle predictably and never repeat consecutively. Writing help prompts are randomly shuffled on each request.
+
+**intent-service.ts** — Lightweight rule-based intent detection that classifies user messages into 9 intents: Greeting, SmallTalk, Gratitude, Farewell, MemoryRecall, EntitySearch, WritingHelp, Reflection, Unknown. Uses regex pattern matching on the trimmed input, ordered by priority (conversational intents checked first, then retrieval-oriented intents via the existing interpretQuery, then falls back to Unknown). For Reflection intents, detects follow-up entity names for keyword search (e.g., "have I written about work recently" extracts "work" as the keyword).
+
+**assistant-service.ts (refactored)** — Replaced the old flat `interpretQuery → retrieve → format` pipeline with a new conversation flow: `detectIntent → choose response handler → optional retrieval → formatted response`. Conversational intents (Greeting, SmallTalk, Gratitude, Farewell) skip retrieval entirely and return curated responses instantly. WritingHelp returns 3 randomly selected writing prompts. Reflection searches entries by keyword and lists matching dates with citations. MemoryRecall and EntitySearch continue using the existing retrieval layer (retrieval-service.ts and search-keyword.ts remain unchanged). Unknown intents receive gentle, helpful responses instead of "I don't know."
+
+**Personality guidelines** enforced throughout: calm, minimal, warm, slightly poetic. No emojis, no human pretense, no ChatGPT style. Responses never claim emotions or human experiences.
+
+### Files Added
+
+- `src/features/assistant/services/responses.ts` — Central conversation assets with rotating responses grouped by intent
+- `src/features/assistant/services/intent-service.ts` — Rule-based intent detection (9 intent types)
+
+### Files Modified
+
+- `src/features/assistant/services/assistant-service.ts` — Refactored to new conversation flow (Intent → Response → Optional Retrieval)
+- `src/features/assistant/types/index.ts` — Added `IntentType` union type
+
+### Architecture Decisions
+
+- **Intent detection before retrieval**: All messages pass through intent detection first. Conversational intents skip the database entirely, making them instant. Only MemoryRecall, EntitySearch, and Reflection reach the retrieval layer.
+- **Conversation assets isolated in one file**: All response text lives in `responses.ts`. Future localization or tone changes require editing only this file — no service or component changes.
+- **Cyclic rotation (not random)**: Response selection uses a per-intent incrementing counter, cycling through the array. This guarantees no consecutive repeats while remaining deterministic and testable.
+- **Reflection uses keyword search**: Reflection intents (e.g., "have I been writing about work?") extract a keyword and feed it to the existing `searchAll` to find matching entries. Results list dates with Open Entry citations — no AI-generated summaries.
+- **Writing help prompts are randomized**: Prompts shuffle using Fisher-Yates on each request, returning a fresh subset.
+- **Retrieval layer unchanged**: `retrieval-service.ts`, `search-keyword.ts`, `response-formatter.ts`, and `query-interpreter.ts` are untouched. The old formatting functions remain importable but are no longer called from the main path (formatting is inlined in `assistant-service.ts` for consistency with the new response style).
+- **No UI changes**: `AssistantPanel.tsx`, `ChatMessage.tsx`, `ChatInput.tsx`, `useAssistantStore.ts`, and `index.ts` are all unchanged. The `processQuery` function signature remains the same — the store continues to work identically.
+
+### Manual Test Results
+
+- Greeting: "hello" → "Hi. Good to see you." (rotates through 5 variants)
+- Small talk: "how are you" → Atlas responds without claiming emotions
+- Gratitude: "thanks" → "You're welcome."
+- Farewell: "goodbye" → "Take care."
+- Writing help: "help me write" → Returns 3 random prompts from pool of 8
+- Memory recall: "what happened yesterday" → Retrieves yesterday's entry via existing retrieval
+- Entity search: "tell me about Rahul" → Finds entries mentioning Rahul with citations
+- Reflection: "have I written about work recently" → Searches "work" keyword, lists matching dates
+- Unknown: "what is the meaning of life" → Gentle response suggesting what Atlas can help with
+- No retrieval calls made for Greeting, SmallTalk, Gratitude, Farewell, WritingHelp, or Unknown intents
+- All existing retrieval continues to work unchanged
+
+### Verification
+
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `cargo check` ✅
+- `cargo test --test e2e_memory` ✅ (1 passed)
+- `vite build` ✅ (242 modules)
+
+---
+
+## Milestone 14 — AI Provider System (Local-First)
+
+### Status
+
+Complete
+
+### Prompt
+
+Build a local-first AI Provider System for Atlas. This milestone establishes the infrastructure so Atlas can communicate with local AI providers (Ollama), without replacing the existing rule-based assistant.
+
+The goal is NOT to make the assistant intelligent yet. The goal is to lay the groundwork: a clean, extensible AI provider architecture where Atlas can detect, connect to, and manage local AI models.
+
+Do NOT replace the rule-based assistant. Do NOT send prompts to Ollama yet. Do NOT implement streaming. Do NOT add tool calling. This is foundation work only.
+
+Requirements:
+
+1. **Provider Architecture**
+   - Define a clean provider interface with methods: `initialize()`, `isAvailable()`, `listModels()`, `currentModel()`, `generate()`, `streamGenerate()`.
+   - Each provider manages its own connection/model state internally.
+
+2. **Provider Manager**
+   - A central manager that loads the active provider, checks availability, lists models, and can switch providers.
+   - Assistant should NEVER talk to a provider directly — always through the manager.
+
+3. **Ollama Provider** (only functional one for now)
+   - Connect to Ollama's local API (default `http://localhost:11434`).
+   - Detect availability: if Ollama is running, show "Connected". If not, show friendly "Local AI not detected" message — never crash or hang.
+   - Discover models via `/api/tags` — never hardcode model names.
+   - Support model selection persisted across sessions.
+
+4. **Other Providers** (placeholders only, NOT functional)
+   - OpenAI, Claude, Gemini, LM Studio — show as options but marked "Coming soon" / disabled.
+   - No actual implementation. Just the interface stubs.
+
+5. **Settings Integration**
+   - Add a new AI section to the Settings page.
+   - Lists available providers (Ollama functional, others placeholder).
+   - Lets user select active provider.
+   - Lets user select model from discovered models (dropdown).
+   - Shows connection status.
+   - Never crashes if Ollama is missing — friendly message instead.
+
+6. **Persistence**
+   - Selected provider + model saved in app settings (localStorage is fine).
+   - Restored on launch.
+
+7. **Assistant Awareness**
+   - The assistant should know whether AI is available and which provider/model is active (for the next milestone). Expose: `AI Available`, `Current Provider`, `Current Model`.
+
+8. **Error Handling**
+   - If Ollama is not running, Atlas must never crash, hang, or show errors. Just show "Local AI not detected. Install Ollama to enable intelligent conversations."
+
+9. **Startup**
+   - Check Ollama availability once on launch (fast, cached).
+   - Do NOT block app startup waiting for Ollama.
+   - Refresh models only when requested (manual refresh button).
+
+### Implementation Summary
+
+Built a local-first AI Provider System foundation without replacing the rule-based assistant. Created a new `features/ai/` module with: a provider interface (`types/index.ts`) defining `initialize()`, `isAvailable()`, `listModels()`, `currentModel()`, `setModel()`, `generate()`, `streamGenerate()`; an `OllamaProvider` implementing the full interface against Ollama's local HTTP API (`http://localhost:11434`) — availability via `GET /api/tags` (2.5s timeout), model discovery via the same endpoint (no hardcoded model names), plus non-streaming `generate()` and streaming `streamGenerate()` for future milestones (not invoked this milestone); a `PlaceholderProvider` for OpenAI / Claude / Gemini / LM Studio (throws if used, shows "Coming soon" in UI); a `AIProviderManager` (`provider-manager.ts`) holding all providers, listing them, tracking the active provider, and delegating availability/model checks; and a Zustand `useAIStore` (`hooks/useAIStore.ts`) that initializes once on app launch (non-blocking), persists the selected provider + model to `localStorage` (`atlas-ai-provider` / `atlas-ai-model`), restores selection with validation, exposes `status` / `available` / `providerId` / `providerName` / `models` / `model`, and supports `refresh()`, `setProvider()`, `setModel()`. Wired `init()` into `App.tsx` via a `useEffect` so Ollama is detected once at startup without blocking render. Added an `AISettings` component to the Settings page showing provider cards (Ollama selectable, placeholders disabled with "Coming soon"), a live connection-status badge, a model dropdown populated from discovered models (with a friendly "install a model" hint when none are found), and a manual Refresh button. Exposed AI state to the assistant by syncing `useAIStore` into `useAssistantStore` as `aiAvailable`, `aiProviderName`, `aiModel` via a store subscription — ready for the next milestone, with no behavioral change to the existing rule-based assistant. Added three icons (`sync`, `check`, `x`) to `Icon.tsx` for status display.
+
+### Files Added
+
+- `src/features/ai/types/index.ts` — `AIProvider`, `AIModel`, `AIProviderInfo`, `ProviderId`, `AIStatus` interfaces
+- `src/features/ai/providers/ollama.ts` — `OllamaProvider` implementing the full provider interface against Ollama's local API
+- `src/features/ai/providers/placeholder.ts` — `PlaceholderProvider` for future cloud/local providers
+- `src/features/ai/providers/index.ts` — Providers barrel export
+- `src/features/ai/provider-manager.ts` — `AIProviderManager` + singleton `aiManager`
+- `src/features/ai/hooks/useAIStore.ts` — Zustand store with startup init, availability caching, localStorage persistence, refresh/select
+- `src/features/ai/components/AISettings.tsx` — AI provider section for the Settings page
+- `src/features/ai/index.ts` — AI feature barrel export
+
+### Files Modified
+
+- `src/App.tsx` — Imported `AISettings` + `useAIStore`; added a non-blocking `useEffect` calling `init()` on launch; replaced the Settings placeholder with a real Settings layout that includes the `AISettings` section
+- `src/features/assistant/hooks/useAssistantStore.ts` — Added `aiAvailable`, `aiProviderName`, `aiModel` fields; subscribed to `useAIStore` so the assistant is aware of AI availability/provider/model for the next milestone (no behavior change to the rule-based flow)
+- `src/shared/ui/Icon.tsx` — Added `sync`, `check`, `x` icons for status display
+
+### Architecture Decisions
+
+- **Provider interface is uniform**: Every provider (functional or placeholder) implements the same `AIProvider` interface, so adding a new provider later means dropping one class and registering it in the manager — no UI or store changes.
+- **Assistant never talks to a provider directly**: All access goes through `aiManager` / `useAIStore`. The assistant store only receives `aiAvailable` / `aiProviderName` / `aiModel` snapshots, keeping the rule-based engine fully decoupled from provider internals.
+- **Non-blocking startup check**: `init()` runs once in an `App.tsx` `useEffect` and sets `status: 'checking'` → `connected`/`unavailable`. It never blocks render and failures are caught, leaving the app fully usable without Ollama.
+- **Ollama detection is discovery-based**: Models come exclusively from `GET /api/tags`; nothing is hardcoded. A 2.5s `AbortController` timeout ensures the check fails fast and gracefully when Ollama is absent.
+- **generate/streamGenerate exist but are unused this milestone**: The Ollama provider implements both `generate()` and `streamGenerate()` against `POST /api/generate`, but the app does not call them yet. They are ready for the next milestone's intelligent conversations.
+- **Placeholder provider throws on use**: `PlaceholderProvider.generate/streamGenerate` throw an explicit "not implemented" error, while the UI disables and labels them "Coming soon" — preventing accidental functional use.
+- **Persistence via localStorage**: Selected provider (`atlas-ai-provider`) and model (`atlas-ai-model`) are stored in `localStorage` and restored on launch with validation (the persisted model is dropped if it is no longer in the discovered model list). This keeps provider configuration local-first with no backend schema change.
+- **AI state exposed to assistant via store subscription**: `useAIStore.subscribe` pushes availability/provider/model into `useAssistantStore`. This is a pure data mirror (guarded against redundant `setState`) so the next milestone can read `aiAvailable` without coupling to the AI module's internals.
+
+### Manual Test Results
+
+- Launch app with Ollama NOT running → Settings → AI Providers shows "Not detected" badge and the friendly message "Local AI not detected. Install Ollama to enable intelligent conversations." App launches and runs normally (no crash, no hang).
+- Launch app with Ollama running and models installed → Settings → AI Providers shows "Connected" badge, provider card "Ollama" highlighted, and a model dropdown populated from `ollama list` (e.g., `llama3`). Selecting a model persists across restart.
+- Switching to a placeholder provider (OpenAI/Claude/Gemini/LM Studio) → card is disabled and labeled "Coming soon"; selection cannot be made.
+- Refresh button re-checks Ollama availability and reloads the model list without restarting the app.
+- Restart Atlas → previously selected Ollama model is restored from localStorage; if the model was removed from Ollama, the selection is cleared gracefully.
+- Rule-based assistant continues to work exactly as before — `aiAvailable` / `aiProviderName` / `aiModel` are populated for the next milestone but do not alter existing responses.
+
+### Verification
+
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `cargo check` ✅
+- `cargo test --test e2e_memory` ✅ (1 passed)
+- `vite build` ✅ (252 modules)
+
+### Notes
+
+This milestone is foundation-only: it establishes a clean, extensible provider architecture and Ollama connectivity, but does NOT yet route assistant conversations through a model. The next milestone (Intelligent Conversations) will use `useAIStore.generated`-style calls — through the manager — to send prompts to Ollama and stream responses, while preserving the rule-based assistant as a fallback when no model is available. The existing assistant UI, retrieval layer, and conversational intelligence from Milestone 13 are entirely unchanged.
+
+---
+
+## Milestone 15 — Local AI Conversations (RAG v1)
+
+### Status
+
+Complete
+
+### Prompt
+
+Connect the existing Assistant to the AI Provider Manager created in Milestone 14. Atlas should begin using the local LLM (Ollama) for natural conversations while remaining grounded in the user's journal. This is NOT a general chatbot. Atlas is a memory companion.
+
+**Conversation Flow:** User → Intent Detection → Memory Retrieval (existing retrieval layer) → Context Builder → AI Provider Manager → Ollama → Response. The assistant must never communicate directly with Ollama. All requests go through the Provider Manager.
+
+**Memory Grounding:** When the user's question requires memory, retrieve the relevant entries first using the existing retrieval system. Build a context containing entry dates, titles, entry content, and relevant entities. Send ONLY that context to the LLM. The model should answer using the supplied context. Never invent memories. If nothing relevant exists, say so naturally.
+
+**Prompt Builder:** A dedicated prompt-builder service that assembles the prompt (Atlas identity, recent conversation history, retrieved memory context, user question). Isolated so it can evolve later.
+
+**Conversation Memory:** Remember only the recent conversation inside the current chat session. Do NOT store AI conversations inside the journal. No permanent memory yet.
+
+**Streaming:** Use the Provider interface's `streamGenerate()` implementation. Display the response progressively. If streaming is unavailable, automatically fall back to `generate()`.
+
+**Fallback:** If no AI provider is available, continue using the existing rule-based assistant automatically. No errors. No broken UI.
+
+**Personality:** Calm, thoughtful, supportive, concise. Never pretend to remember something that wasn't retrieved. Never fabricate journal entries. Never claim emotions or consciousness.
+
+**Performance:** Only retrieve memory when needed. Do not query the database for greetings or casual conversation. Reuse existing retrieval functions.
+
+**Out of Scope:** No cloud providers. No tool calling. No editing journal entries. No auto-summarizing the entire database.
+
+### Implementation Summary
+
+Connected the existing Assistant (Milestone 12/13) to the Milestone 14 AI Provider Manager so Atlas can hold natural, memory-grounded conversations with a local LLM (Ollama) while preserving the rule-based assistant as a fully automatic fallback. Added a dedicated, isolated prompt-builder service (`prompt-builder.ts`) that assembles the LLM prompt from Atlas identity, recent in-session conversation history, retrieved memory context, and the user question. Added a memory-retrieval helper (`memory-retrieval.ts`) that reuses the existing retrieval layer (`retrieval-service.ts` and `search-keyword.ts`) to fetch relevant entries only when the detected intent requires memory (MemoryRecall, EntitySearch, Reflection-with-keyword) — greetings, small talk, gratitude, farewell, writing help, and unknown intents skip the database entirely. Added an AI conversation orchestrator (`ai-conversation.ts`) implementing the full flow: intent detection → optional memory retrieval → context building → prompt building → Provider Manager `streamGenerate()`, with automatic fallback to `generate()` on streaming failure and propagation of empty/error results so the store can fall back. Rewired `useAssistantStore.sendMessage` to (1) add the user message, (2) add a streaming placeholder assistant message, (3) when a provider is available, stream tokens into that message via `runAIConversation`, falling back to the existing `processQuery` rule-based path on any error or empty result, and (4) when no provider is available, use `processQuery` directly. Added `isStreaming` to the `Message` type and updated `ChatMessage`/`AssistantPanel` to render a progressive streaming state (typing dots while empty, blinking cursor while filling) and to suppress the standalone typing indicator once a streaming message exists. The assistant never talks to Ollama directly — all model access goes through `aiManager`/`useAIStore`.
+
+### Files Added
+
+- `src/features/assistant/services/prompt-builder.ts` — Isolated prompt assembly (Atlas identity + history + memory context + question)
+- `src/features/assistant/services/memory-retrieval.ts` — Reuses existing retrieval layer to fetch grounded entries when memory is needed
+- `src/features/assistant/services/ai-conversation.ts` — Orchestrates intent → retrieval → context → prompt → Provider Manager streaming (with `generate()` fallback)
+
+### Files Modified
+
+- `src/features/assistant/types/index.ts` — Added optional `isStreaming?: boolean` to `Message`
+- `src/features/assistant/hooks/useAssistantStore.ts` — Rewired `sendMessage` for streaming AI responses with automatic rule-based fallback; preserved `processQuery` usage
+- `src/features/assistant/components/ChatMessage.tsx` — Renders streaming state (typing dots when empty, blinking cursor while filling)
+- `src/features/assistant/components/AssistantPanel.tsx` — Suppresses standalone typing indicator once a streaming message exists
+
+### Architecture Decisions
+
+- **Assistant never talks to Ollama directly**: All model access flows through `aiManager.getProvider().streamGenerate/generate`, exactly as the Milestone 14 contract requires. The assistant store and AI conversation service hold no Ollama URLs or fetch logic.
+- **Prompt builder is isolated**: `prompt-builder.ts` owns only string assembly (identity, history, context, question). Tone, identity, and structure can evolve there without touching retrieval or orchestration.
+- **Retrieval reuse, not duplication**: `memory-retrieval.ts` calls the same `retrieval-service.ts` / `search-keyword.ts` functions the rule-based path uses, keeping one retrieval source of truth. The rule-based `assistant-service.ts` was left untouched to preserve every existing feature verbatim.
+- **Memory only when needed**: Intent detection gates database access — conversational intents (greeting, small talk, gratitude, farewell, writing help, unknown) never hit the database, matching the performance requirement; only MemoryRecall, EntitySearch, and Reflection-with-keyword retrieve.
+- **Grounded context, no invention**: The LLM receives only the retrieved journal entries as context; the system instruction explicitly forbids fabricating memories or claiming emotions/consciousness, and instructs it to say naturally when no relevant entry exists.
+- **Streaming with graceful degradation**: `streamGenerate()` is used first for progressive display; if it throws or returns empty, `generate()` is tried; if that also fails/empties, the orchestrator throws so the store falls back to the rule-based assistant. The UI shows tokens as they arrive via an `onToken` callback updating the placeholder message.
+- **Automatic fallback preserves UX**: When `aiAvailable()` is false (Ollama absent, placeholder provider selected, or no model chosen), `sendMessage` routes straight to the existing `processQuery` — no errors, no broken UI. AI errors also fall back to `processQuery`.
+- **Conversation memory is session-only**: History is built from the in-memory `messages` array (last 6 turns) and never persisted to SQLite or the journal. No permanent AI memory is introduced.
+- **Citations preserved**: Retrieved entries become `Citation[]` on the final AI message, so the existing "Sources / Open Entry" UI continues to work, letting users jump to the grounded journal entries.
+
+### Manual Test Results
+
+- Ollama running + model selected → "What happened yesterday?" retrieves the entry, grounds it as context, and streams a natural answer from Ollama; citations list the source date(s) with "Open Entry".
+- Ollama running, no model selected → falls back to the rule-based assistant automatically (no crash, no error shown).
+- Ollama NOT running → assistant behaves exactly as before (rule-based), app launches and runs normally.
+- Greeting "hello" / small talk "how are you" → no database query; routed to Ollama for a natural reply (or rule-based fallback if AI unavailable).
+- "Tell me about Rahul" → EntitySearch retrieves Rahul's entries, grounds context, streams an answer; citations link to those entries.
+- "Have I written about work recently?" → Reflection extracts keyword "work", searches entries, grounds context, streams answer referencing the found dates.
+- If Ollama is present but returns an error mid-stream → store catches and substitutes the rule-based response.
+- Response is calm/concise, never claims emotions or fabricates entries; when nothing is found the model states so naturally.
+- Rule-based conversational responses (greetings, writing prompts, gratitude, farewell) remain intact via the fallback path.
+
+### Verification
+
+- `tsc --noEmit` ✅
+- `eslint .` ✅
+- `cargo check` ✅
+- `cargo test --test e2e_memory` ✅ (1 passed)
+- `vite build` ✅ (255 modules)
+
+### Notes
+
+This milestone makes the assistant genuinely conversational and memory-grounded via RAG, while the Milestone 13 rule-based engine remains the guaranteed fallback whenever a local LLM is unavailable or errors. All requests pass exclusively through the Provider Manager; no journal entries are edited, no cloud providers added, and AI conversations are kept only within the live chat session. Future work could add permanent AI memory, summarization, or tool calling — all explicitly out of scope here.

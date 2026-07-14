@@ -86,3 +86,33 @@ pub fn get_entity_detail(
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     crate::repositories::get_entity_detail(&conn, &entity_id).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn find_entries_between_dates(
+    state: State<Database>,
+    from_date: String,
+    to_date: String,
+) -> Result<Vec<Entry>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::find_entries_between_dates(&conn, &from_date, &to_date)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn find_recent_entries(
+    state: State<Database>,
+    days: i64,
+) -> Result<Vec<Entry>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::find_recent_entries(&conn, days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn find_entries_by_entity_name(
+    state: State<Database>,
+    entity_name: String,
+) -> Result<Vec<Entry>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    crate::repositories::find_entries_by_entity_name(&conn, &entity_name)
+        .map_err(|e| e.to_string())
+}
