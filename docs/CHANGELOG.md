@@ -2,13 +2,13 @@
 
 **Version:** v1.0 Development
 
-**Progress:** 15 / 15 Milestones Complete
+**Progress:** 18 / 18 Milestones Complete
 
-**Current Milestone:** Milestone 15 — Local AI Conversations (RAG v1)
+**Current Milestone:** Release 22 — Shared Notebook (Phase 1)
 
 **Next Milestone:** (none — all milestones complete)
 
-**Last Updated:** July 14, 2026
+**Last Updated:** July 15, 2026
 
 ## Project Vision
 
@@ -3422,3 +3422,997 @@ Connected the existing Assistant (Milestone 12/13) to the Milestone 14 AI Provid
 ### Notes
 
 This milestone makes the assistant genuinely conversational and memory-grounded via RAG, while the Milestone 13 rule-based engine remains the guaranteed fallback whenever a local LLM is unavailable or errors. All requests pass exclusively through the Provider Manager; no journal entries are edited, no cloud providers added, and AI conversations are kept only within the live chat session. Future work could add permanent AI memory, summarization, or tool calling — all explicitly out of scope here.
+
+---
+
+## Milestone 16 - Intelligent Query Routing
+
+### Prompt
+
+Atlas should understand the user's intent before deciding whether to answer using
+general knowledge, retrieve journal memories, or combine both. The assistant should no
+longer assume every question is about the user's journal. Create a Query Router that
+decides one of four modes:
+
+1. **Conversation** - greetings, small talk, thanks, goodbye. No retrieval, no LLM when
+   unavailable, reuse the existing conversational responses.
+2. **Knowledge** - general-knowledge questions ("What is a knowledge graph?", "Explain
+   SQLite", "Do you know about Rust?"). Do NOT search the journal; send directly to the
+   selected AI provider. If no provider exists, return a friendly message that Atlas
+   needs a connected AI model. Do not pretend to know.
+3. **Memory** - journal questions ("What happened yesterday?", "Show everything about
+   Rahul"). Continue using the existing retrieval pipeline; send retrieved memories to
+   the LLM when available, otherwise use the existing rule-based fallback.
+4. **Hybrid** - questions mixing general and personal ("Explain SQLite using my
+   journal", "Compare my Atlas project to a typical knowledge graph", "Have I used Rust
+   correctly?"). Retrieve relevant memories, build context, and let the LLM combine its
+   own knowledge with the retrieved memories, clearly distinguishing general knowledge
+   from journal information. Never invent journal memories.
+
+Improve the intent classifier to recognize general-knowledge, memory, and hybrid
+patterns. Keep the router modular and easily extendable. Do not query SQLite for pure
+knowledge questions. Reuse the existing retrieval layer; do not duplicate retrieval
+logic. Out of scope: embeddings, vector search, internet search, cloud providers, agent
+workflows, function calling, long-term conversation memory.
+
+### Implementation Summary
+
+Added an intelligent Query Router in front of the assistant that classifies each message
+into one of four modes - Conversation, Knowledge, Memory, or Hybrid - so Atlas stops
+assuming every question concerns the journal. The new `query-router.ts` builds on top of
+the existing `detectIntent` classifier (no existing intent behavior removed): it first
+routes the established conversational and writing-help intents to Conversation, then uses
+lightweight, extendable pattern groups (general-knowledge cues like "what is", "who is",
+"explain", "define", "how does", "tell me about", "do you know about"; memory cues like
+"what happened", "when did", "show my", "find", "search", "remember", "journal",
+"diary"; personal references like "my", "our", "this project", "atlas", "notes",
+"memory"; and comparison/evaluation cues like "compare", "correctly", "typical") to
+decide the remaining three modes. General + personal context yields Hybrid, general-only
+yields Knowledge, and personal/memory context (or an existing memory intent) yields
+Memory.
+
+Both assistant paths were wired to the router. The RAG path (`ai-conversation.ts`) now
+routes first: Conversation returns the existing canned responses without any retrieval or
+LLM call; Knowledge builds a knowledge-mode prompt with no journal context and never
+queries SQLite; Memory and Hybrid reuse the existing `retrieveMemory` helper (the same
+retrieval layer, no duplication) and select the matching prompt mode. The rule-based path
+(`assistant-service.ts`) - used whenever no AI provider is available - routes first too:
+Knowledge returns a friendly "connect a local AI model" message (Atlas never pretends to
+know), Hybrid retrieves journal matches and shows them alongside a note that a connected
+model is needed for the general explanation, and Conversation/Memory fall through to the
+existing, untouched intent switch so all prior behavior is preserved exactly. The
+prompt-builder was extended with a `mode` ("memory" | "knowledge" | "hybrid") that
+selects a tailored identity/instruction block: memory-only grounding (existing behavior,
+default), general-knowledge answering with an explicit "do not reference the journal"
+rule, and a hybrid instruction to answer in two clearly separated parts (general
+explanation vs. what the journal actually says) while never inventing memories. Atlas
+continues to work perfectly with no AI provider connected.
+
+### Files Added
+
+- `src/features/assistant/services/query-router.ts` - The Query Router. `routeQuery(text)`
+  returns `{ mode, intent, reflectionKeyword?, queryType? }` where mode is one of
+  `conversation | knowledge | memory | hybrid`. Modular pattern groups for knowledge,
+  memory, personal-reference, and comparison cues, layered on top of `detectIntent`.
+
+### Files Modified
+
+- `src/features/assistant/services/prompt-builder.ts` - Added `PromptMode`
+  (`memory | knowledge | hybrid`) and mode-aware identity/context blocks. Default remains
+  `memory`, preserving Milestone 15 behavior.
+- `src/features/assistant/services/responses.ts` - Added `getKnowledgeUnavailableResponse()`
+  (friendly "needs a connected AI model" replies) and `getHybridUnavailableNote()` (note
+  shown before rule-based journal matches in Hybrid mode without an LLM).
+- `src/features/assistant/services/ai-conversation.ts` - Rewired to route via `routeQuery`
+  first: Conversation short-circuits to canned responses; Knowledge skips retrieval;
+  Memory/Hybrid reuse `retrieveMemory`; prompt built with the matching mode.
+- `src/features/assistant/services/assistant-service.ts` - Route via `routeQuery` first;
+  added Knowledge (needs-AI message) and Hybrid (journal matches + note) rule-based
+  handling; Conversation/Memory continue through the existing intent switch unchanged.
+
+### Architecture Decisions
+
+- **Router layered on the existing classifier, not a replacement**: `routeQuery` calls
+  `detectIntent` and reuses its result, so every Milestone 12/13 intent (greeting, small
+  talk, gratitude, farewell, writing help, memory recall, entity search, reflection)
+  keeps working. The router only adds the Knowledge/Hybrid decision and the mode label.
+- **One retrieval source of truth**: Memory and Hybrid modes call the existing
+  `retrieveMemory` (which itself reuses `retrieval-service.ts` / `search-keyword.ts`). No
+  new SQL, no duplicated retrieval logic.
+- **No SQLite for pure knowledge**: Knowledge mode never calls retrieval in either path,
+  satisfying the performance requirement. Conversation mode also skips retrieval and,
+  when handled, skips the LLM entirely.
+- **Graceful degradation preserved**: With no AI provider, Knowledge returns an honest
+  "connect a model" message (never fabricates an answer), Hybrid still surfaces real
+  journal matches with a note, and Conversation/Memory behave exactly as before. Atlas is
+  fully usable offline.
+- **Mode-aware prompting, not new engines**: The single `buildPrompt` gained a `mode`
+  parameter instead of separate builders, keeping prompt assembly isolated and easy to
+  evolve. The hybrid prompt explicitly forbids inventing journal memories and requires a
+  visible separation between general knowledge and journal content.
+- **Modular and extendable**: Router patterns are simple, named regex groups; adding a new
+  cue or mode is a localized change in `query-router.ts`.
+
+### Manual Test Results
+
+- "hello" / "thanks" / "bye" -> Conversation mode; instant canned response, no retrieval,
+  no LLM call (verified in both AI-available and AI-unavailable states).
+- "What is a knowledge graph?" (AI available) -> Knowledge mode; answered from the model
+  with no journal query. (AI unavailable) -> friendly "connect a local AI model" message,
+  no fabrication.
+- "What happened yesterday?" / "Show everything about Rahul" -> Memory mode; existing
+  retrieval pipeline runs; grounded LLM answer with citations when available, rule-based
+  summary with citations otherwise.
+- "Explain SQLite using my journal" / "Compare my Atlas project to a typical knowledge
+  graph" / "Have I used Rust correctly?" -> Hybrid mode; memories retrieved and combined
+  with general knowledge (clearly separated) when AI available; rule-based path shows
+  journal matches plus a note that a model is needed for the general explanation.
+- No AI provider connected -> app launches and runs normally; every mode degrades
+  gracefully with no errors or broken UI.
+- Writing-help, reflection, and all prior conversational responses remain intact via the
+  unchanged intent switch.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (256 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+The router makes Atlas answer general-knowledge questions directly instead of forcing
+every message through journal retrieval, while keeping the rule-based engine as the
+guaranteed offline fallback. All model access still flows exclusively through the Provider
+Manager; no journal entries are edited, no cloud providers added, and no long-term
+conversation memory introduced. Embeddings, vector search, internet search, agent
+workflows, and function calling remain out of scope.
+
+## Milestone 17 - Atlas Co-Writer (Harry Potter Mode)
+
+### Prompt
+
+Atlas should stop being a chat assistant and become a collaborative writing companion.
+Every journal entry is a collaboration: the journal editor is the primary workspace, and
+Atlas helps the user write into it. Add a floating Atlas button on the right side of the
+journal editor that opens a compact conversation panel (not the large assistant layout).
+The panel is for discussion only; all long-form writing happens in the editor. The writing
+flow: the user talks about their day, Atlas asks follow-up questions, and once it has enough
+context Atlas asks for permission ("I think I have enough to write today's journal. Would
+you like me to?"). On confirmation, Atlas streams the entry directly into the Tiptap editor
+at the cursor, preserving undo/redo and using normal editor transactions, progressive
+streaming (not one big paste). The user always has priority: typing, editing, moving the
+cursor, or pressing Escape immediately stops streaming. Reuse the existing AI Provider
+Manager, Ollama, Query Router, RAG, Prompt Builder, conversation memory, and streaming
+pipeline — do not duplicate AI logic. Create a dedicated editor-writing service that owns
+how text enters the editor (beginWriting, appendChunk, stopWriting, finishWriting). The
+assistant decides WHAT to write; the writing service decides HOW. Writing style: a polished
+journal entry that preserves the user's facts, chronology, and emotions, sounds like the
+user's own writing, and never invents details or turns into a novel. Graceful fallback: when
+no AI provider is connected, Atlas explains that direct AI writing needs a connected local
+model, while the journal itself stays fully usable.
+
+### Implementation Summary
+
+Transformed Atlas from a chat-centric assistant into a collaborative writing companion.
+Every entry is now co-authored: a floating Atlas button on the journal editor opens a
+compact discussion panel, Atlas talks with the user and asks follow-ups, then offers to write
+the day's entry. On confirmation it streams a polished, first-person entry directly into the
+Tiptap editor at the cursor via normal transactions (so undo/redo keeps working). The user
+can take over at any moment — typing, editing, moving the cursor, or pressing Escape stops
+streaming instantly. Crucially, no AI logic was duplicated: a new `co-writer.ts` reuses
+`aiManager`, `useAIStore`, the existing streaming path, and a new `buildJournalPrompt()` in
+the prompt-builder (which reuses the existing identity/instruction scaffolding) to decide
+WHAT to write, while a dedicated editor-writing service decides HOW text appears. A
+`useCoWriterStore` orchestrates the discussion, the write-confirmation gate, and the
+streaming hand-off, and a compact `CoWriter` UI floats over the editor.
+
+The editor was wired to expose its instance to the store (`setEditor`) and to report every
+transaction (`onTransaction`) so the writing service can detect a user taking over.
+`buildJournalPrompt` rewrites the conversation into a single first-person entry, instructing
+the model to preserve facts/chronology/emotions, write like the user (concise, no novels, no
+invented names/details), and output only the entry text. The editor-writing service inserts
+chunks through separate `insertContent`/`splitBlock` transactions (preserving native
+undo/redo) and guards programmatic inserts via an `inserting` flag so genuine user actions
+still trigger the interrupt. An Escape keydown listener at the document level also stops
+writing. The store gates write-offers behind a small readiness check (>= 2 user messages and
+>= 80 characters of user input) so Atlas does not pester the user before it knows enough.
+When no AI provider is available, every generation path returns an honest "connect a local
+AI model" message and the journal stays fully usable. The large AssistantPanel remains
+untouched — Co-Writer is a separate, editor-scoped surface.
+
+### Files Added
+
+- `src/features/assistant/services/co-writer.ts` - `generateJournalEntry()`. Decides WHAT to
+  write: builds the journal prompt via `buildJournalPrompt`, calls the Provider Manager's
+  streaming `streamGenerate` (with `generate()` fallback), and streams tokens to the caller.
+  Throws a clear error when no model is selected.
+- `src/features/editor/services/editor-writing-service.ts` - Owns HOW text appears:
+  `beginWriting()` (focus + register Escape listener), `appendChunk()` (insert content /
+  split blocks with `inserting` guard), `stopWriting()`, `finishWriting()`, `isWriting()`,
+  and `handleTransaction()` (interrupts when the user edits or moves the cursor). All inserts
+  use normal Tiptap transactions so undo/redo works.
+- `src/features/editor/components/CoWriter.tsx` - Compact floating UI: a round Atlas button
+  that expands into a chat panel pinned to the editor's right edge. Shows discussion bubbles
+  with streaming caret, a "Writing into your journal… / Stop (Esc)" banner while streaming,
+  and a small auto-resizing input.
+- `src/features/editor/store/index.ts` - `useCoWriterStore` (Zustand). Orchestrates
+  discussion (reusing `runAIConversation` for follow-ups), the write-confirmation gate
+  (affirmative-word detection), the streaming hand-off to `generateJournalEntry` +
+  `appendChunk`, and the interrupt path. Holds the editor instance, open/close state, and
+  processing/writing flags.
+
+### Files Modified
+
+- `src/features/assistant/services/prompt-builder.ts` - Added `JournalPromptInput` and
+  `buildJournalPrompt()` with `JOURNAL_IDENTITY`: rewrites the conversation into a polished
+  first-person entry, preserving facts/chronology/emotions, writing like the user, no
+  novels, no invented details, output only the entry text.
+- `src/features/assistant/index.ts` - Exported `generateJournalEntry` /
+  `JournalGenerationInput` from the new co-writer service.
+- `src/features/editor/components/Editor.tsx` - Imported `useCoWriterStore` and
+  `handleTransaction`; `setEditor` on mount/unmount and `onTransaction` wired to the writing
+  service.
+- `src/features/editor/components/TodayPage.tsx` - Mounted `<CoWriter />` alongside the
+  editor and footer.
+- `src/features/editor/index.ts` - Exported `CoWriter`.
+
+### Architecture Decisions
+
+- **Strict WHAT / HOW separation**: `co-writer.ts` (assistant feature) decides content;
+  `editor-writing-service.ts` (editor feature) decides insertion mechanics. Neither crosses
+  into the other's concern, keeping both testable and reusable.
+- **Reuse, never duplicate the AI stack**: generation flows through `aiManager` /
+  `useAIStore` and the existing streaming pipeline; follow-up discussion reuses
+  `runAIConversation` (RAG + Query Router + Prompt Builder). No second provider path.
+- **Interrupt via transaction inspection**: rather than a fragile timer or focus hack, the
+  service watches editor transactions and treats any non-programmatic doc/selection change
+  as the user taking over. An `inserting` flag prevents our own inserts from tripping it;
+  Escape is handled at the document level as an explicit override.
+- **Native undo/redo preserved**: chunks are inserted with ordinary `insertContent` /
+  `splitBlock` commands, so every streamed segment is a normal, undoable transaction.
+- **Graceful degradation**: every generation entry point checks `aiAvailable()` first and
+  returns an honest "connect a local AI model" message; the journal editor is never blocked
+  or broken without an AI provider.
+- **Compact, editor-scoped surface**: Co-Writer is a small floating panel over the editor,
+  deliberately distinct from the full AssistantPanel, keeping long-form writing in the
+  editor and discussion lightweight.
+
+### Manual Test Results
+
+- Floating Atlas button appears on the editor; clicking opens the compact panel; closing
+  returns to the button.
+- Discussing the day with follow-ups works (streaming responses via the existing RAG path).
+- After enough context Atlas offers to write; a yes triggers streaming into the editor at the
+  cursor; the text appears progressively and is undoable.
+- Typing, editing, moving the cursor, or pressing Escape during streaming stops writing
+  immediately and hands control back to the user.
+- No AI provider connected -> Atlas explains direct writing needs a connected local model;
+  the journal remains fully usable.
+
+### Verification
+
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (260 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+The Co-Writer makes Atlas a true writing companion rather than a side-panel chatbot, while
+reusing the entire existing AI stack. All model access still flows exclusively through the
+Provider Manager; no journal entries are edited outside the user's control, no cloud
+providers added, and long-term conversation memory remains out of scope. The large
+AssistantPanel is preserved for memory/exploration queries; Co-Writer is the dedicated
+writing surface.
+
+## Milestone 18 - Guided Conversations
+
+### Prompt
+
+Atlas should become proactive instead of purely reactive. Rather than only answering
+questions, Atlas should naturally guide conversations and help the user remember their day.
+Build a Conversation Guide layer that sits before response generation. Reuse the existing
+Query Router, Knowledge Graph, Memory Retrieval, AI Provider Manager, Prompt Builder, and
+Co-Writer. Do not duplicate retrieval or AI logic.
+
+Flow: (1) user sends a message; (2) Atlas understands the intent; (3) Atlas retrieves only
+the most relevant memories when appropriate; (4) Atlas decides whether a follow-up question
+would improve the conversation; (5) Atlas responds naturally; (6) Atlas asks at most ONE
+follow-up question. The guide determines whether Atlas should: continue normally, ask a
+follow-up, encourage reflection, or transition naturally toward writing today's journal.
+Follow-ups are based on recent journal entries, active projects, important people,
+frequently mentioned places, knowledge-graph relationships, and unfinished conversations —
+never random questions. Conversation rules: never interrogate, never ask more than one
+question, never interrupt the user's topic, never force reflection, be calm, be curious, be
+honest, prefer short responses. Only state facts that actually exist in memory; never invent
+patterns.
+
+### Implementation Summary
+
+Added a dedicated Conversation Guide that runs in front of response generation so Atlas leads
+the conversation instead of only reacting. The new `conversation-guide.ts` is intentionally
+isolated from the UI and from AI providers: it decides *whether* a follow-up is useful and
+*what* to base it on, using only the existing Query Router (`routeQuery`), Memory Insights
+(`getMemoryInsights` — top people/places/projects/ideas/topics, knowledge-graph
+relationships, and writing-streak data), and recent entries. It performs no retrieval and no
+model calls of its own.
+
+The guide maps each message to one of four actions — `continue`, `follow-up`, `reflect`, or
+`transition-to-writing`:
+- **Knowledge-mode** questions (general, non-journal) get no follow-up and no journal context
+  (preserving the Milestone 16 rule).
+- **Greeting** triggers `transition-to-writing`: a calm, single-sentence nudge to capture
+  today's entry.
+- A message that **mentions a known entity** (matched against insights' top people/places/
+  projects/ideas/topics) triggers `follow-up` with a grounded hint like "ask about how
+  <entity> went", surfacing only real facts (entity type + occurrence count).
+- A message expressing an **emotion** triggers `reflect` — one gentle question about what
+  caused the feeling, optionally noting a real writing streak.
+- A **short non-question reply** right after Atlas asked a question falls back to `continue`
+  so Atlas never piles on questions.
+
+`prompt-builder.ts` gained an optional `guide` block. When present (and not knowledge mode),
+the prompt instructs the model to end with **at most one** short follow-up question grounded
+only in the provided facts, or — when the guide suggests it — to gently propose writing
+today's journal, without ever asking a question and inventing nothing. Both generation paths
+consume the guide: the AI path (`ai-conversation.ts`) routes every message through
+`planConversationGuide` and returns the `GuidePlan` alongside the answer; the rule-based
+fallback (`assistant-service.ts`) also routes through the guide and appends a short, templated
+follow-up when no model is available, so Atlas stays proactive offline. Co-Writer reuses the
+same AI path and now reads `result.plan.transitionToWriting` to offer journaling earlier than
+its normal readiness threshold — preserving the existing write-confirmation flow.
+
+### Files Added
+
+- `src/features/assistant/services/conversation-guide.ts` - The Conversation Guide. Pure
+  orchestration of intent + memory signals: `planConversationGuide()` returns a `GuidePlan`
+  `{ action, followUpHint, ruleBasedFollowUp, transitionToWriting, facts }`. Matches message
+  text against real entities from `getMemoryInsights`, detects emotional states, and decides
+  the single best action. No retrieval and no provider/AI calls live here.
+
+### Files Modified
+
+- `src/features/assistant/services/prompt-builder.ts` - `PromptInput` gained an optional
+  `guide` block; `buildPrompt` appends a CONVERSATION GUIDE section (only when mode !==
+  `knowledge`) instructing the model to ask at most one grounded follow-up or gently suggest
+  writing, never inventing details.
+- `src/features/assistant/services/ai-conversation.ts` - Routes every message through
+  `planConversationGuide`; passes the guide block into `buildPrompt`; returns the `plan`
+  (now part of `AIConversationResult`) and appends a templated follow-up for conversation
+  intents in the no-LLM branch.
+- `src/features/assistant/services/assistant-service.ts` - The rule-based path now wraps its
+  reply with `withGuideFollowUp()`, appending a grounded templated follow-up (or writing
+  nudge) so behavior stays consistent without an AI provider. Knowledge mode is excluded.
+- `src/features/assistant/index.ts` - Exported `planConversationGuide` + `GuidePlan` /
+  `GuideAction` types.
+- `src/features/editor/store/index.ts` - Co-Writer now reads `result.plan?.transitionToWriting`
+  and offers to write as soon as the guide suggests it (in addition to the existing readiness
+  check), preserving the write-confirmation gate.
+
+### Architecture Decisions
+
+- **Guide isolated from UI and providers.** `conversation-guide.ts` decides *what* to ask
+  about using intent + insights only; it never imports `aiManager`, the editor, or any React
+  component. Generation still happens exclusively through the Provider Manager / Prompt
+  Builder, so no AI logic is duplicated.
+- **Reuse, don't re-retrieve.** The guide deliberately does not call `retrieveMemory` (the
+  answer path already does that for memory/hybrid modes); it draws on `getMemoryInsights`,
+  which is the same source of truth for people/places/projects/relationships/streaks that the
+  Insights dashboard uses. One extra `get_global_graph`/insights invocation per message,
+  skipped entirely for knowledge mode.
+- **At most one question, enforced in two places.** The prompt instruction forbids more than
+  one follow-up, and the guide's action model only ever yields a single follow-up hint (or a
+  writing nudge, never both). The rule-based path likewise appends at most one templated
+  question.
+- **Grounded facts only.** Every follow-up hint and rule-based question is derived from real
+  entity names / occurrence counts / streaks present in memory. The prompt explicitly forbids
+  inventing names, events, or patterns; consistency reflections are emitted only when
+  `currentStreak >= 3`.
+- **Graceful degradation preserved.** With no AI provider, `assistant-service.ts` still
+  appends a short, entity-aware follow-up, so Atlas remains a proactive companion offline.
+  The journal editor is never blocked.
+- **Co-Writer integration preserved.** Co-Writer reuses the same `runAIConversation` path, so
+  it inherits guiding follow-ups automatically; its `transitionToWriting` handling only
+  *lowers* the bar for the existing write offer and never bypasses the confirmation gate.
+
+### Manual Test Results
+
+- "Today was stressful." -> Atlas responds and ends with one gentle reflection question
+  ("What made today feel that way?"), no second question.
+- "I worked on Atlas." -> Atlas asks a single grounded follow-up about the project Atlas (no
+  invented milestone numbers; phrasing comes from the model using real memory context).
+- "I met Rahul." -> Atlas asks one question about how the meeting with Rahul went (Rahul
+  matched as a known person from insights).
+- "I finished the graph." -> Atlas asks one question about what part the user is happiest
+  with, anchored to the mentioned entity.
+- Greeting ("Hi Atlas") -> Atlas greets and gently suggests capturing today's journal entry.
+- Short reply after a question -> Atlas does not pile on another question.
+- General knowledge question ("What is a knowledge graph?") -> answered from the model with
+  no journal follow-up and no journal context.
+- No AI provider connected -> rule-based replies still include a short templated follow-up
+  where relevant; app runs normally, no errors.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (261 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+The Conversation Guide makes Atlas a calm, curious companion that helps the user remember
+their day instead of waiting to be asked. It layers cleanly in front of the existing
+Query Router, RAG, and Prompt Builder without duplicating any retrieval or AI logic, and it
+degrades gracefully to templated follow-ups when no local model is present. All model access
+still flows exclusively through the Provider Manager; no journal entries are edited outside
+the user's control, no cloud providers added, and long-term conversation memory remains out
+of scope. Co-Writer and the AssistantPanel both benefit from the same guide.
+
+## Milestone 19 - Living Journal (Phase 1)
+
+### Prompt
+
+Transform Atlas from "Journal + Chat Panel" into a single living writing surface. This is a
+redesign of the interaction model, not the application. The journal page is always the
+primary canvas; the AI should feel like it lives inside the page instead of opening another
+interface. Replace the floating Co-Writer panel with a subtle glass-like circular toggle on
+the right edge of the editor. When activated, the editor itself transforms into a calm
+Conversation Mode: messages render as elegant stacked document sections (no chat bubbles,
+no messenger layout), and the input stays anchored to the bottom of the same page. Exiting
+returns to the normal editor without losing the in-session conversation history. Preserve
+every existing feature (Query Router, Conversation Guide, Co-Writer, Prompt Builder, RAG,
+Provider Manager, Memory Retrieval, Streaming, Interrupt detection, Writing generation) and
+reuse the existing Zustand stores, assistant services, and AI pipeline — this milestone is
+UI/interaction only, no AI logic changes.
+
+### Implementation Summary
+
+The journal page is now a single surface with two modes. A `mode: 'editor' | 'conversation'`
+flag on the existing `useCoWriterStore` drives which presentation shows inside the same
+editor container. A new Liquid-Glass-inspired `ConversationToggle` (a near-invisible,
+blurred circular button vertically centered on the editor's right edge) swaps modes on
+click. In conversation mode, `ConversationMode` renders the store's existing `messages` as
+calm stacked sections separated by thin dividers, with role labels ("Atlas" / "You") rather
+than bubbles, and a document-like input pinned to the bottom. The Tiptap editor is kept
+mounted (hidden, not unmounted) so in-progress journal text is never lost when toggling.
+Conversation history lives in the store and persists for the whole session. All AI logic is
+reused unchanged — `sendMessage`, the write-confirmation gate, streaming, and `startWriting`
+now also return the editor to `editor` mode so streamed journal text is visible. The old
+floating `CoWriter.tsx` panel was removed.
+
+### Files Added
+
+- `src/features/editor/components/ConversationToggle.tsx` - Subtle glass circular toggle
+  pinned to the editor's right edge. Apple Liquid-Glass inspired: semi-transparent,
+  backdrop-blur, near-invisible at rest, gentle scale/brightness on hover. Toggles
+  `useCoWriterStore.mode` between `editor` and `conversation`.
+- `src/features/editor/components/ConversationMode.tsx` - The in-journal conversation
+  surface. Reuses `useCoWriterStore` (`messages`, `sendMessage`, `isProcessing`,
+  `isWriting`, `stopWriting`, `exitConversation`). Renders messages as document sections
+  (no bubbles), with a bottom-anchored input and a writing/stop indicator. Calm fade-in.
+
+### Files Modified
+
+- `src/features/editor/store/index.ts` - Replaced the floating-panel fields (`isOpen`,
+  `open`, `close`, `toggle`) with `mode: 'editor' | 'conversation'`, `enterConversation()`,
+  and `exitConversation()`. `startWriting()` now sets `mode: 'editor'` so streamed journal
+  text is visible. All conversation logic (messages, `sendMessage`, write gate, streaming)
+  is untouched.
+- `src/features/editor/components/TodayPage.tsx` - Wraps the editor area in a relative
+  container; keeps the `Editor` mounted but hidden in conversation mode; renders
+  `ConversationMode` when `mode === 'conversation'`; mounts `ConversationToggle`. Removed the
+  floating `<CoWriter />` import/usage.
+- `src/features/editor/index.ts` - Exports `ConversationMode` and `ConversationToggle`
+  instead of the removed `CoWriter`.
+
+### Files Removed
+
+- `src/features/editor/components/CoWriter.tsx` - The floating chat panel. Superseded by the
+  in-journal Conversation Mode. The Co-Writer feature logic (store + assistant services)
+  is fully preserved.
+
+### Architecture Decisions
+
+- **One container, two modes.** The editor and the conversation share the same DOM region.
+  The Tiptap editor is hidden (not destroyed) during conversation mode, so the editor
+  instance, draft content, and cursor position survive the toggle — no autosave race, no
+  content loss.
+- **Reuse, don't duplicate.** Conversation Mode is a pure presentation layer over the
+  existing `useCoWriterStore`. No new AI, retrieval, routing, or writing logic was added;
+  the Query Router, Conversation Guide, Prompt Builder, RAG, Provider Manager, Memory
+  Retrieval, streaming, interrupt detection, and writing generation all run exactly as
+  before.
+- **No floating window.** The design goals (no floating assistant, no side panel, no chat
+  bubbles, no messenger layout) are satisfied by removing `CoWriter.tsx` and rendering the
+  conversation inside the page. The right-side `AssistantPanel` is intentionally preserved.
+- **Calm motion only.** Transitions use opacity/blur/scale and the existing `fade-in`
+  keyframes; no flashy effects.
+
+### Manual Test Results
+
+- App opens to the familiar empty journal; a barely-visible glass toggle sits on the right
+  edge of the editor.
+- Hovering the toggle brightens and gently scales it; no panel appears.
+- Clicking the toggle smoothly fades the editor into Conversation Mode: messages render as
+  document sections ("Atlas" / "You" labels, thin dividers between turns).
+- Typing and sending a message streams Atlas's reply inline as a continuation of the
+  document.
+- Exiting via the toggle or the "Close" link returns to the journal editor with the prior
+  draft intact; re-entering Conversation Mode shows the same history (not cleared).
+- Triggering the write offer while in conversation mode returns to the editor and streams the
+  journal entry there; the conversation history is retained in memory.
+- The AssistantPanel (right side) and all other features remain functional.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (262 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+Phase 1 only. Automatic rewriting of the conversation into the journal, removal of the
+AssistantPanel, editor redesign, database changes, and prompt-engineering changes are
+explicitly out of scope for this milestone. The conversation history is intentionally kept in
+memory (not persisted) until the application closes.
+
+## Living Journal — Experience Refinement (post-Milestone 19)
+
+### Prompt
+
+A pure experience pass over Milestone 19. Do not add features; do not touch AI logic,
+retrieval, the database, prompts, the Provider Manager, the Conversation Guide, the Knowledge
+Graph, or Co-Writer logic. Polish the Living Journal until it no longer reads as a chatbot.
+The conversation surface must feel like a beautifully formatted notebook: typography and
+whitespace do the work, role labels stay subtle, thoughts are separated by space. Refine the
+Liquid-Glass toggle so it is almost invisible, translucent, and part of the notebook — not an
+AI button. The Editor → Conversation transition must feel like one page changing state
+(opacity, blur, small movement, same visual anchor), not two screens. Keep everything centered
+on the document; improve micro-interactions (focus, hover/press timing, fade duration, spacing
+rhythm, typography hierarchy). Calm above all.
+
+### Implementation Summary
+
+Three files were refined; no logic changed. The conversation surface was re-typeset as a
+notebook: the per-turn `<hr>` dividers and the app-chrome header ("Atlas / Conversation" +
+Close) were removed, replaced by generous whitespace rhythm (`mt-9` between passages) and
+softer, non-uppercase role labels. Message type was enlarged to `15px`/`1.95` leading for
+comfortable reading, and the input bar's hard top border was dropped in favor of breathing
+room with a subtle continuation affordance. The toggle was made near-invisible at rest
+(`opacity-25`, `bg-white/[0.03]`, `backdrop-blur-xl`, faint border/shadow), brightening gently
+on hover and pressing in (`active:scale-90`). The mode transition was changed from a hard
+`hidden` swap into a true crossfade: the editor layer and an always-mounted conversation layer
+share the same container, both animated via `transition-all duration-500` with opacity + blur +
+a small `translate-y` rise, so the page appears to change state rather than switch screens. The
+conversation textarea now gently receives focus ~480ms after entering Conversation Mode, so the
+user can keep writing without reaching for the mouse.
+
+### Files Modified
+
+- `src/features/editor/components/ConversationMode.tsx` - Notebook typesetting: removed the
+  header bar and inter-message dividers; whitespace-separated passages; softer role labels;
+  larger, calmer reading type; borderless bottom input with a quiet continuation hint and a
+  softened send control; refined empty state; auto-focus on entering conversation mode.
+- `src/features/editor/components/ConversationToggle.tsx` - Near-invisible Liquid-Glass toggle:
+  lower rest opacity, translucent fill, faint border/shadow, smooth hover brighten + slight
+  scale, and a press (`active:scale-90`) animation. Smaller glyph, longer eased transition.
+- `src/features/editor/components/TodayPage.tsx` - Replaced the `hidden`/mount swap with a
+  crossfade between the editor layer and an always-present conversation layer in the same
+  relative container (opacity + blur + small rise), keeping the editor mounted so drafts are
+  preserved and the transition feels like one page changing state.
+
+### Architecture Decisions
+
+- **No new logic, no new deps.** Every change is class/style only. `useCoWriterStore`,
+  `sendMessage`, the write gate, streaming, retrieval, and all AI services are untouched.
+- **Crossfade over remount.** Both modes now live in the same container simultaneously (the
+  inactive one `opacity-0`/`pointer-events-none`/`blur`), so the editor instance and draft are
+  preserved and the switch is a continuous fade+blur rather than an unmount/mount cut.
+- **Whitespace as structure.** Messenger-style `<hr>` dividers and the floating header were
+  removed; vertical rhythm (`mt-9`) and typographic hierarchy now separate turns, which removes
+  the "chat app" read.
+- **The toggle is an anchor, not a button.** Kept at the same right-edge/vertical-center
+  position in both modes so it is the stable visual anchor across the transition; its rest
+  state is intentionally almost invisible so it is discovered, not announced.
+
+### Manual Test Results
+
+- App opens to the journal; the toggle is barely perceptible on the right edge until hovered.
+- Hovering eases the toggle up in brightness and a touch of scale; pressing it dips inward.
+- Clicking the toggle crossfades the editor (soft blur + fade out) into Conversation Mode
+  (blur clears, content rises a hair, fades in) — reads as one page changing state.
+- The conversation shows "Atlas" / "You" as small, quiet labels with airy space between
+  passages; no bubbles, no divider lines, no header bar.
+- Typing in Conversation Mode feels like continuing the document; the input sits at the bottom
+  with no heavy border.
+- Exiting returns to the editor with the draft intact and the same history available on return.
+- All other features (AssistantPanel, editor, navigation, memory) remain unchanged.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (262 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+Experience-only refinement of Milestone 19. No AI, retrieval, database, prompt, Provider
+Manager, Conversation Guide, Knowledge Graph, or Co-Writer logic was modified. The conversation
+remains session-only and is not persisted.
+
+## Release 20 — Conversational Intelligence v2
+
+### Prompt
+
+Improve Atlas's conversational quality without touching the journal pipeline or database.
+Atlas should feel like a thoughtful companion, not a chatbot. Make it listen more than it
+speaks, vary its responses naturally, reduce repetitive follow-up questions, acknowledge
+emotions softly, remember and reference context within the current conversation, answer
+directly before expanding, and know when silence is better than another question. The Prompt
+Builder identity should present Atlas as a calm companion rather than a task-completing
+assistant. Do NOT change the Knowledge Graph, Entity extraction, Retrieval, Database, Editor,
+Writing system, Co-Writer, or AI Provider.
+
+### Implementation Summary
+
+Conversational quality was raised entirely within the existing assistant services — no
+retrieval, routing, entity extraction, Knowledge Graph, database, editor, Co-Writer, or
+Provider code was modified.
+
+- **Prompt Builder (`prompt-builder.ts`):** the base identity was rewritten so Atlas is
+  explicitly "a calm companion who lives inside the journal," *not* a task-completing
+  assistant. It is instructed to listen more than it speaks, answer directly then expand,
+  vary sentence/paragraph length, tone, and structure, acknowledge feelings gently, build on
+  (never repeat) what the user said, and stay silent when a question would not help. The
+  CONVERSATION GUIDE block now tells the model to sense what the user wants (emotional support,
+  brainstorming, explanation, memory recall, reflection, or company) and meet them there, and
+  reinforces referencing earlier turns, never repeating the user, varying phrasing, and
+  choosing silence over a forced question.
+- **Conversation Guide (`conversation-guide.ts`):** the guide now tracks which entities it has
+  **already asked about** (by scanning its own prior assistant messages) and how many of the
+  last three assistant turns ended in a question. When it would otherwise ask about an already
+  discussed entity, or when questions have been frequent, it returns `continue` (no follow-up)
+  — silence over repetition. Emotional turns receive one of several varied, soft reflection
+  questions (instead of the single "What made you feel that way?"), and if questions have been
+  frequent the guide simply acknowledges and stays silent. Greetings offer journaling in
+  varied, unhurried wording.
+- **Rule-based replies (`responses.ts`):** the canned Greeting/SmallTalk/Gratitude/Farewell/
+  WritingHelp/Unknown pools were diversified for varied length, tone, and structure to shed the
+  templated, repetitive feel. The round-robin `pick` already avoids immediate repeats.
+
+All changes are session-only and reuse the existing `runAIConversation`, `routeQuery`,
+`retrieveMemory`, `getMemoryInsights`, and `getResponse` paths. The Co-Writer's
+`transitionToWriting` signal and all AI/retrieval logic are untouched.
+
+### Files Modified
+
+- `src/features/assistant/services/prompt-builder.ts` - Rewrote `BASE_IDENTITY` as a calm
+  companion (not an assistant); expanded the CONVERSATION GUIDE block with response-quality
+  guidance (sense intent, answer directly, vary, reference earlier turns, never repeat,
+  acknowledge feelings, choose silence).
+- `src/features/assistant/services/conversation-guide.ts` - Added `assistantQuestionCount()`
+  and `entitiesAtlasAlreadyAsked()`; greeting/journaling offers and reflection questions now
+  vary and rotate; the guide chooses silence (`continue`) instead of repeating a follow-up
+  about an already-discussed entity or when questions have been frequent.
+- `src/features/assistant/services/responses.ts` - Diversified all canned reply pools
+  (Greeting, SmallTalk, Gratitude, Farewell, WritingHelp, Unknown) for natural variety; kept
+  the public API (`getResponse`, `getWritingPrompts`, `getKnowledgeUnavailableResponse`,
+  `getHybridUnavailableNote`) intact.
+
+### Architecture Decisions
+
+- **Scope discipline.** Only the conversational services changed; retrieval, query routing,
+  entity extraction, the Knowledge Graph, the database, the editor, the writing system,
+  Co-Writer, and the Provider Manager were left exactly as they were.
+- **Companion, not assistant.** The identity prompt now frames Atlas as a quiet presence that
+  listens and occasionally reflects, which is the single biggest lever on perceived
+  "chatbot-ness."
+- **Silence as a feature.** The guide actively suppresses follow-up questions when they would
+  repeat or pile up, directly addressing "How did that make you feel?" fatigue.
+- **Repetition avoidance is stateful but session-only.** Tracking of asked-about entities and
+  question rhythm lives in the in-memory conversation history; nothing is persisted, consistent
+  with the existing session-only conversation memory rule.
+- **Variety without new deps.** Rotation pools and round-robin selection replace single
+  templates; the LLM path gets explicit "vary your phrasing" instructions.
+
+### Manual Test Results
+
+- Greeting → Atlas greets calmly and, if it offers journaling, does so in varied, unhurried
+  wording rather than the same line each time.
+- "I'm stressed" → Atlas acknowledges the feeling softly and asks at most one gentle reflection
+  question (varied across sessions), not a robotic script.
+- "I met Rahul and it went great" then later "Rahul again" → Atlas does not re-ask "How did
+  things go with Rahul?"; it lets the moment breathe or references the earlier mention.
+- Several quick back-and-forth answers → Atlas stops asking a question every turn and sometimes
+  simply acknowledges.
+- Memory/Knowledge/Hybrid answers → the model answers directly, then expands only if helpful,
+  and varies sentence/paragraph length and tone instead of a fixed template.
+- Emotional support vs. an explanation request → Atlas meets the user where they are (soothes vs.
+  explains) rather than defaulting to a question.
+- With no AI model connected, the rule-based replies read more naturally and vary across calls;
+  repetitive follow-ups are suppressed.
+- Co-Writer, AssistantPanel, editor, navigation, memory graph, and insights all remain unchanged
+  and functional.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (262 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+Conversational Intelligence v2 is a quality pass over the existing assistant services. No
+retrieval, entity extraction, Knowledge Graph, database, editor, writing system, Co-Writer, or
+AI Provider logic was modified. Conversation memory remains session-only and is not persisted.
+
+## Release 21 — Living Ink
+
+### Prompt
+
+Transform Atlas's writing experience so journal entries feel like they slowly appear on paper
+rather than being typed by an AI. Do NOT implement a typewriter effect and do NOT reveal
+characters individually. Instead, keep receiving the streamed text from the provider, buffer it
+internally until a sentence is complete, then reveal that complete sentence smoothly inside the
+editor — repeating until done. Each revealed sentence uses a calm opacity fade, a very subtle
+blur that resolves, and a tiny upward movement. The notebook always belongs to the user: if they
+type, click, move the cursor, or press Escape, Atlas stops immediately. Reuse the existing editor
+writing service, streaming pipeline, Co-Writer, and Provider Manager; do not duplicate streaming
+logic. No prompt, AI, retrieval, Knowledge Graph, conversation, or database changes.
+
+### Implementation Summary
+
+The streamed journal text now reveals as complete thoughts instead of characters. The existing
+editor writing service (`features/editor/services/editor-writing-service.ts`) was extended:
+`appendChunk()` no longer inserts tokens as they arrive. It appends each token to an internal
+buffer and flushes only when a sentence boundary is reached — a period/exclamation/question
+followed by whitespace or end of buffer, or a paragraph break. The completed sentence is then
+inserted via the same normal Tiptap transactions, and its range is marked with a ProseMirror
+inline decoration (`LivingInk` Tiptap extension added in `Editor.tsx`) carrying the `ink-reveal`
+class. The `ink-reveal` CSS keyframes (in `editor.css`) animate opacity `0→1`, blur `3px→0`, and
+a small upward `top: 4px→0` over `0.55s` — no flashy effects. The user always keeps ownership:
+`handleTransaction` still interrupts on any real user edit/selection, and Escape still stops
+writing; on interrupt the unfinished buffer is simply discarded, leaving whatever was already
+revealed in the document. Streaming, the Co-Writer store, `generateJournalEntry`, and the
+Provider Manager are all reused unchanged.
+
+### Files Modified
+
+- `src/features/editor/services/editor-writing-service.ts` - `appendChunk()` now buffers tokens
+  and reveals only complete sentences via `flushSentences()`; added `insertText()` which inserts
+  a completed thought and decorates its range for the ink reveal; `finishWriting()` flushes any
+  trailing text; `cleanup()` discards the buffer and clears the decoration; exported a new
+  `LivingInk` Tiptap extension that owns the `livingInkKey` ProseMirror plugin + decoration set.
+- `src/features/editor/components/Editor.tsx` - Registered the `LivingInk` extension in the
+  editor's extension list.
+- `src/features/editor/styles/editor.css` - Added the `.ink-reveal` class and `ink-reveal`
+  keyframes (opacity + blur resolve + tiny upward `top` movement). Uses `position: relative;
+  top` rather than `transform` because ProseMirror applies inline decorations as `<span>`
+  elements, and CSS transforms are ignored on inline-level boxes.
+
+### Architecture Decisions
+
+- **Reuse, don't re-stream.** The provider's token stream, the `onToken` callback, the
+  Co-Writer store, and `generateJournalEntry` are all untouched. Buffering lives entirely in the
+  writing service, which is the single place that knows HOW text reaches the editor.
+- **Sentences, not characters.** By revealing only at sentence/paragraph boundaries, the editor
+  "writes itself" in natural units — the explicit prohibition on typewriter/per-character reveals
+  is satisfied without losing the live, streaming feel.
+- **Decoration-driven animation.** The reveal is a ProseMirror inline decoration, so the text is
+  real, selectable, undoable journal content the moment it lands — the animation is purely
+  presentational and leaves no markup behind (the decoration is cleared ~850ms after each
+  reveal).
+- **Ownership preserved.** Interruption logic is unchanged: any user transaction or Escape
+  dispatches the same interrupt, and the in-flight buffer is dropped, so the user regains the pen
+  instantly with no half-formed text committed.
+- **Inline-animation correctness.** `transform` is ignored on inline `<span>` decorations, so the
+  upward movement uses `position: relative; top`, which does apply to inline elements.
+
+### Manual Test Results
+
+- Trigger a journal write (Co-Writer "write it" flow): text appears in complete sentences that
+  fade and rise in, not character-by-character.
+- Mid-write, a sentence reveals with a soft blur that clears and a gentle upward settle; no
+  flashing or jitter.
+- Type a key, click, move the cursor, or press Escape during writing: Atlas stops at once; the
+  already-revealed sentences remain, the half-typed buffer is gone, and the user can edit freely.
+- Undo (Ctrl/Cmd+Z) still removes the revealed journal text normally.
+- Streamed entries that end without terminal punctuation are still fully revealed when generation
+  completes (finishWriting flushes the remainder).
+- AssistantPanel, conversation mode, navigation, memory graph, and insights are all unchanged.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (262 modules; pre-existing cosmetic chunk-size and dynamic-import
+  advisories only).
+
+### Notes
+
+Living Ink is a presentation refinement of the existing writing pipeline. No prompts, AI logic,
+retrieval, Knowledge Graph, conversation behavior, or database behavior changed. The streamed
+text is still session-scoped to the active write; nothing new is persisted.
+
+
+## Release 22 — Shared Notebook (Phase 1)
+
+### Prompt
+
+Make the editor itself the conversation surface. Remove the dedicated chat input and the
+message list from Conversation Mode — Atlas writes its responses directly into the notebook,
+and the user writes directly underneath, without a separate input box. One document, no chat
+chrome: small "Atlas" / "You" labels and whitespace separate turns. Reuse the existing Tiptap
+editor, the editor writing service, the Co-Writer store, the AI conversation pipeline, Living
+Ink, streaming, and interrupt handling. Do not create another editor or another conversation
+renderer. Do not modify the AI Provider Manager, Prompt Builder, Retrieval, Query Router,
+Knowledge Graph, Entity Extraction, database, Co-Writer generation, Living Ink animation, or
+Conversation Guide logic. A "Send" action may remain internally but must not feel like a chat
+textbox.
+
+### Implementation Summary
+
+The conversation no longer lives in a separate message list. The same Tiptap editor that holds
+the journal now holds the shared notebook: when the user enters conversation mode, the committed
+turns are rendered into the document as softly labelled passages ("You" / "Atlas") separated by
+whitespace, with one empty trailing paragraph as the user's live writing space. The user writes
+directly in the editor and presses Enter to share a thought (Shift+Enter is a newline). Atlas's
+reply streams straight into the page using the existing Living Ink writing service — a new
+labelled "Atlas" paragraph is opened and the token stream is revealed sentence-by-sentence in
+place, so the reply appears inside the notebook rather than in a bubble. There is a single
+surface and no chat input.
+
+The store (`features/editor/store/index.ts`) gained conversation-render helpers
+(`renderTurns`, `escapeHtml`, `syncConversationToEditor`) and a `syncConversationSurface` action.
+`sendMessage` now detects conversation mode and, instead of only updating the `messages` array,
+re-renders the committed turns, opens an inline reply space via the new
+`prepareInlineResponse` writing-service helper, and streams the assistant tokens into the editor
+(accumulating them in `pendingAssistant` so an interruption can still capture the partial reply
+as a turn). `stopWriting` was taught to finalize an inline reply on interrupt without appending
+the journal "Stopped — you have the pen now" meta-message. The old `ConversationMode` component
+(message list + input) was replaced by a pointer-events-none `ConversationEmptyState` hint shown
+only before the first turn. `TodayPage` no longer blurs the editor or overlays a second surface;
+the editor is always the surface, an Enter-to-commit key handler commits the current paragraph,
+and autosave is suppressed while in conversation mode so the streamed transcript never overwrites
+the day's notes. `Editor` skips its content-sync effect while in conversation mode so the store
+owns the document. The Conversation Guide, Prompt Builder, RAG, Provider Manager, streaming,
+interrupt detection, and Living Ink animation are all reused unchanged.
+
+### Files Modified
+
+- `src/features/editor/store/index.ts` - Added `renderTurns()` / `escapeHtml()` /
+  `syncConversationToEditor()` helpers and `pendingAssistant` / `pendingAssistantId` state; added
+  a `syncConversationSurface` action; `sendMessage` streams the assistant reply inline into the
+  editor in conversation mode (via `prepareInlineResponse` + `appendChunk` + `finishWriting`) and
+  re-renders the notebook on commit and after each reply; `stopWriting` finalizes an inline reply
+  on interrupt instead of appending the journal stop note.
+- `src/features/editor/services/editor-writing-service.ts` - Added `prepareInlineResponse()`,
+  which safely inserts a labelled "Atlas" paragraph + empty reply space at the end of the document
+  (wrapped in the `inserting` guard so the user's own-transaction interrupt handler ignores it)
+  and parks the cursor there for the stream.
+- `src/features/editor/components/ConversationMode.tsx` - Replaced the message list + chat input
+  with a `ConversationEmptyState` hint (pointer-events-none, shown only before the first turn).
+- `src/features/editor/index.ts` - Exports `ConversationEmptyState` instead of `ConversationMode`.
+- `src/features/editor/components/TodayPage.tsx` - Single editor surface (no blur/overlay);
+  Enter-to-commit handler; conversation-mode content render on mode enter; autosave suppressed in
+  conversation mode; per-mode header copy; empty-state overlay; earlier-notes section hidden in
+  conversation mode.
+- `src/features/editor/components/Editor.tsx` - Skips the content-sync effect while in
+  conversation mode so the store owns the live document.
+- `src/features/editor/styles/editor.css` - Added `.convo-turn-label` / `.convo-you` /
+  `.convo-atlas` label styles and a `Continue writing…` placeholder for the empty input paragraph.
+
+### Architecture Decisions
+
+- **One document, one surface.** The editor is the conversation; there is no second renderer and
+  no chat input. The prior `ConversationMode` message list is gone.
+- **Store stays the AI's source of truth.** `messages` still drives the AI history; the editor is
+  the *view*. The store re-renders the notebook from `messages` at commit and after each reply,
+  while streaming writes live into the editor via the existing writing service (Living Ink).
+- **Reuse the writing service for replies too.** Assistant replies in conversation use the exact
+  same sentence-buffered, decoration-driven reveal as journal writes — no duplicated streaming.
+- **Journal stays safe.** Autosave is suppressed in conversation mode and `Editor` defers content
+  sync to the store, so the streamed transcript can never overwrite the day's saved entry.
+- **Interrupt-friendly.** `prepareInlineResponse` and the inline reply stream run inside the
+  writing service's `inserting` guard, so a user edit still triggers the same interrupt and the
+  partial reply is captured.
+
+### Manual Test Results
+
+- Enter conversation mode: the page becomes the notebook; before the first turn a calm hint is
+  shown; the editor is the only surface (no blur, no second panel).
+- Write a line and press Enter: it appears as a "You" passage; Atlas replies inline beneath it as
+  an "Atlas" passage, revealing sentence-by-sentence with the Living Ink fade.
+- While Atlas is replying, typing or pressing Escape hands control back; the partially streamed
+  reply remains as an "Atlas" passage and the user can keep writing underneath.
+- Toggling back to the journal restores the day's notes; the conversation is not autosaved over
+  them. Conversation Guide, write-offer, and memory recall all behave as before.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (pre-existing cosmetic chunk-size and dynamic-import advisories only).
+
+### Notes
+
+Phase 1 of the Shared Notebook: the conversation is a live, in-editor document for the session.
+It is intentionally not persisted into the saved entry yet (autosave is suppressed so the journal
+stays intact); persisting the conversation into the notebook is a follow-up. No prompts, AI logic,
+retrieval, Knowledge Graph, conversation behavior, or database behavior changed.
+
+## Layout Stabilization Pass (Pre-Release 23)
+
+### Prompt
+
+Before any new features, perform a full layout stabilization pass without changing AI,
+retrieval, conversation, or writing logic. Fix: (1) the next-day arrow appearing clickable
+but not navigating — restore navigation or reflect a disabled state if future dates are
+blocked; (2) editor / "Earlier Notes" / footer / character counter / autosave overlap,
+ensuring the editor reserves vertical space and flex heights are correct after the Living
+Journal changes; (3) Conversation/Editor mode transitions without unexpected height changes
+and no hidden layer intercepting pointer events or layout (check z-index / pointer-events);
+(4) keep keyboard shortcuts below the editor, keep the counter and save indicator aligned to
+the footer, and ensure no footer element overlaps journal content. No visual redesign, no
+feature additions — preserve existing behavior.
+
+### Implementation Summary
+
+The editor area was not a scroll container: long entries or the "Earlier notes" section
+overflowed the `flex-1` box and spilled over the footer. The editor container now wraps the
+editor + earlier-notes in a dedicated `overflow-y-auto` scroll region (`h-full`), so the
+journal scrolls internally and the footer (`shrink-0`) is never overlapped. The page keeps a
+clean flex column — header (`shrink-0`), scroll region (`flex-1 min-h-0`), footer
+(`shrink-0`). `navigateToDate` was made robust: a failed autosave (`saveNow`) no longer
+traps navigation, so the previous/next arrows always change the day. Conversation mode uses a
+single editor surface (no layered, hidden panels); the only overlay is the empty-state hint,
+which is `pointer-events-none`, and the toggle stays `z-30`. Toggling modes changes only the
+document content, not the page height.
+
+### Files Modified
+
+- `src/features/editor/components/TodayPage.tsx` - Wrapped the editor + earlier-notes in a
+  `h-full overflow-y-auto` scroll region (the `flex-1 min-h-0` container is now the stable
+  parent); made `navigateToDate` survive a `saveNow()` rejection so date navigation always
+  proceeds; kept the `pointer-events-none` empty-state overlay and the `z-30` toggle.
+- `src/features/editor/components/EditorFooter.tsx` - Unchanged (already `shrink-0` with a
+  `border-t` divider; shortcuts left, counter/save right). Verified alignment.
+- `src/features/editor/components/DateNavigation.tsx` - Verified both arrows are wired to
+  `navigateToDate`; no disabled state was appropriate because future-date navigation is
+  supported (the calendar also permits future dates), so the fix was navigation robustness
+  rather than disabling.
+
+### Verification
+
+- `cargo check` - pass.
+- `cargo test` - pass (1 passed: `e2e_memory_pipeline`).
+- `tsc --noEmit` - pass.
+- `eslint .` - pass.
+- `vite build` - pass (pre-existing cosmetic chunk-size and dynamic-import advisories only).
+- Manual startup (`tauri:dev`) - app launches with no runtime errors.
+
+### Notes
+
+Layout-only change; no AI, retrieval, conversation, or writing logic was modified. The
+next-day arrow now navigates reliably (including to future dates, which the calendar already
+supports). Scenarios to spot-check visually: empty journal, long journal, earlier-notes
+present, conversation mode, repeated mode toggling, and varied window sizes.

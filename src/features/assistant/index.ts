@@ -1,1 +1,7 @@
 export { AssistantPanel } from './components/AssistantPanel'
+export { runAIConversation } from './services/ai-conversation'
+export type { AIConversationInput, AIConversationResult } from './services/ai-conversation'
+export { generateJournalEntry } from './services/co-writer'
+export type { JournalGenerationInput } from './services/co-writer'
+export { planConversationGuide } from './services/conversation-guide'
+export type { GuidePlan, GuideAction } from './services/conversation-guide'

@@ -5,6 +5,8 @@ import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useEffect } from 'react'
 import type { Editor as EditorInstance } from '@tiptap/core'
+import { useCoWriterStore } from '../store'
+import { handleTransaction, LivingInk } from '../services/editor-writing-service'
 
 interface EditorProps {
   content: string
@@ -16,6 +18,9 @@ function getCharCount(editor: EditorInstance): number {
 }
 
 export function Editor({ content, onUpdate }: EditorProps) {
+  const setCoWriterEditor = useCoWriterStore((s) => s.setEditor)
+  const mode = useCoWriterStore((s) => s.mode)
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -30,6 +35,7 @@ export function Editor({ content, onUpdate }: EditorProps) {
       Placeholder.configure({
         placeholder: 'Start writing...',
       }),
+      LivingInk,
     ],
     content,
     editorProps: {
@@ -42,13 +48,24 @@ export function Editor({ content, onUpdate }: EditorProps) {
       const chars = getCharCount(editor)
       onUpdate(html, chars)
     },
+    onTransaction: ({ transaction }) => {
+      handleTransaction(transaction)
+    },
   })
 
   useEffect(() => {
+    // In Shared Notebook mode the store owns the editor content (the live
+    // conversation); never let a parent re-render reset it back to the entry.
+    if (mode === 'conversation') return
     if (editor && content !== editor.getHTML()) {
       editor.commands.setContent(content)
     }
-  }, [editor, content])
+  }, [editor, content, mode])
+
+  useEffect(() => {
+    setCoWriterEditor(editor ?? null)
+    return () => setCoWriterEditor(null)
+  }, [editor, setCoWriterEditor])
 
   if (!editor) {
     return null

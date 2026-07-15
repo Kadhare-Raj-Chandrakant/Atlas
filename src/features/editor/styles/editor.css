@@ -159,3 +159,54 @@
   background: var(--color-primary-500);
   color: white;
 }
+
+/* Living Ink (Release 21): a completed sentence reveals calmly inside the
+   journal — a soft fade with a subtle blur that resolves and a tiny rise.
+   No character-by-character typewriter effect.
+
+   Note: ProseMirror applies inline decorations as <span> elements, and CSS
+   transforms are ignored on inline-level boxes. We use position:relative + top
+   (which DOES apply to inline elements) for the gentle upward movement. */
+.ink-reveal {
+  position: relative;
+  animation: ink-reveal 0.55s ease-out both;
+}
+
+@keyframes ink-reveal {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    top: 4px;
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    top: 0;
+  }
+}
+
+/* Shared Notebook (Release 22): the editor is the conversation surface. Turns
+   are labelled notebook passages separated by whitespace — never chat bubbles. */
+.convo-turn-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin-top: 1.9em;
+  margin-bottom: 0.2em;
+}
+
+.convo-you {
+  color: var(--color-neutral-600);
+}
+
+.convo-atlas {
+  color: var(--color-primary-300);
+  opacity: 0.72;
+}
+
+/* The user's live writing space at the foot of the conversation. */
+.ProseMirror p.convo-input:empty::before {
+  content: 'Continue writing…';
+  color: var(--color-neutral-600);
+  pointer-events: none;
+}

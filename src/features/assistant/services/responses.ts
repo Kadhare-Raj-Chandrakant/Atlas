@@ -1,58 +1,66 @@
 import type { IntentType } from '../types'
 
 const greetingResponses = [
-  'Hi. Good to see you.',
-  'Welcome back.',
-  'Hey. What\u2019s on your mind today?',
-  'Hello. I\u2019m here when you\u2019re ready to write or remember.',
-  'Good to have you here.',
+  'Hey. Good to see you.',
+  'Hi. I’m glad you’re here.',
+  'Hello — whatever’s on your mind, I’m listening.',
+  'Hey. Take your time; I’m not going anywhere.',
+  'Good to see you. How’s the day treating you?',
+  'Hi. Quietly here, ready when you are.',
 ]
 
 const smallTalkResponses = [
-  'I\u2019m doing exactly what I was built for\u2014ready whenever you want to write or remember something.',
-  'Not much. Your memories are waiting whenever you want to explore them.',
-  'Quiet as always. Your journal entries are safe and ready.',
-  'Same as ever. Just keeping your memories organized until you need them.',
+  'I’m just here, keeping you company.',
+  'Doing fine — mostly I sit with your words and wait for you.',
+  'Not much. I tend to stay quiet unless you need me.',
+  'Steady as ever. Your journal’s been keeping itself, same as always.',
+  'I’m well, thanks for asking. How about you?',
 ]
 
 const gratitudeResponses = [
-  'You\u2019re welcome.',
-  'Happy to help.',
   'Anytime.',
-  'Glad I could help.',
-  'Of course.',
+  'Happy to be here.',
+  'Of course — that’s what I’m for.',
+  'You’re welcome. I mean that.',
+  'Glad I could sit with you for it.',
 ]
 
 const farewellResponses = [
   'Take care.',
-  'See you next time.',
-  'Sleep well. Your memories will still be here tomorrow.',
-  'Until next time.',
-  'Goodbye. I\u2019ll be here when you return.',
+  'Rest well. I’ll be here tomorrow.',
+  'See you soon.',
+  'Go gently. Your words will keep.',
+  'Bye for now — I’m not far.',
 ]
 
 const writingHelpPrompts: string[] = [
-  'What made today different?',
-  'What surprised you today?',
-  'What conversation stayed with you?',
-  'What are you thinking about lately?',
-  'What is one thing you noticed today that you almost missed?',
-  'What felt meaningful today, even in a small way?',
-  'If today had a title, what would it be?',
-  'What are you looking forward to?',
+  'What made today different from yesterday?',
+  'Try starting with one small thing you noticed.',
+  'What conversation is still echoing in your head?',
+  'If today had a color, what would it be?',
+  'You don’t need a grand reason — just begin where you are.',
+  'What surprised you, even a little?',
+  'Write the first true sentence that comes to mind. The rest tends to follow.',
+  'What are you carrying that you haven’t said out loud yet?',
 ]
 
 const unknownResponses = [
-  'I\u2019m not quite sure what you\u2019re asking.',
-  'Could you tell me a little differently?',
-  'I can help you remember things you\u2019ve written or help you start writing.',
-  'I\u2019m not sure I understand. You can ask me about your entries, people you\u2019ve mentioned, or projects you\u2019ve worked on.',
+  'I’m not quite following — say it another way?',
+  'I’m not sure I understand. You can ask me about your entries, or just tell me what’s on your mind.',
+  'Hmm, I didn’t catch that. Want to try again?',
+  'I can help you remember things you’ve written, or simply sit with whatever you’re thinking.',
 ]
 
 const reflectionNoResultsResponses = [
-  'I didn\u2019t find any entries mentioning that.',
+  'I didn’t find any entries mentioning that.',
   'Nothing came up for that. It might not have come up in your writing yet.',
-  'No matches found. It could be something you haven\u2019t written about yet.',
+  'No matches found. It could be something you haven’t written about yet.',
+]
+
+const knowledgeUnavailableResponses = [
+  'That’s a general-knowledge question. To answer it well I need a connected AI model. You can connect a local model (Ollama) from Settings, and I’ll be glad to help.',
+  'I’d love to explain that, but general-knowledge answers need a connected AI model. Once a local model is available in Settings, just ask again.',
+  'For questions like that I rely on a connected AI model. I can still help you search and recall your own journal anytime.',
 ]
 
 const counters: Record<string, number> = {}
@@ -84,4 +92,12 @@ export function getResponse(intent: IntentType): string {
 export function getWritingPrompts(count = 3): string[] {
   const shuffled = [...writingHelpPrompts].sort(() => Math.random() - 0.5)
   return shuffled.slice(0, count)
+}
+
+export function getKnowledgeUnavailableResponse(): string {
+  return pick(knowledgeUnavailableResponses, 'knowledgeUnavailable')
+}
+
+export function getHybridUnavailableNote(): string {
+  return 'For the general explanation I’d need a connected AI model (you can add a local one in Settings). Here’s what I could find in your journal:'
 }

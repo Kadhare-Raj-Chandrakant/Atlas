@@ -9,3 +9,9 @@ src-tauri/target/
 
 # Editor-specific files
 .vscode/
+
+# OpenCode internal config and plugins
+.opencode/
+
+# Graphify skill output
+graphify-out/

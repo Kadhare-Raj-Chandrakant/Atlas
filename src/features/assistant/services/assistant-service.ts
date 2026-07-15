@@ -1,6 +1,14 @@
 import type { Message } from '../types'
 import { detectIntent } from './intent-service'
-import { getResponse, getWritingPrompts } from './responses'
+import { routeQuery } from './query-router'
+import { retrieveMemory } from './memory-retrieval'
+import { planConversationGuide } from './conversation-guide'
+import {
+  getResponse,
+  getWritingPrompts,
+  getKnowledgeUnavailableResponse,
+  getHybridUnavailableNote,
+} from './responses'
 import {
   findEntryByDate,
   findEntriesBetweenDates,
@@ -11,6 +19,14 @@ import {
 interface ResponseOutput {
   text: string
   citations: import('../types').Citation[]
+}
+
+/** Append a grounded, templated follow-up (Milestone 18) when the guide suggests one. */
+async function withGuideFollowUp(text: string, query: string): Promise<string> {
+  const route = routeQuery(query)
+  if (route.mode === 'knowledge') return text
+  const plan = await planConversationGuide({ message: query, route })
+  return plan.ruleBasedFollowUp ? `${text}\n\n${plan.ruleBasedFollowUp}` : text
 }
 
 let messageIdCounter = 0
@@ -167,12 +183,56 @@ async function handleReflection(keyword?: string): Promise<ResponseOutput> {
   }
 }
 
+async function handleHybridRuleBased(params: {
+  intent: ReturnType<typeof routeQuery>['intent']
+  reflectionKeyword?: string
+  queryType?: ReturnType<typeof routeQuery>['queryType']
+}): Promise<ResponseOutput> {
+  const note = getHybridUnavailableNote()
+  try {
+    const memory = await retrieveMemory(params)
+    if (memory.entries.length === 0) {
+      return {
+        text: `${note}\n\nI couldn\u2019t find anything in your journal for this yet.`,
+        citations: [],
+      }
+    }
+    const summaries = memory.entries
+      .slice(0, 8)
+      .map((e) => `\u2022 ${shortDate(e.date)} \u2014 ${e.content.slice(0, 120)}`)
+    const extra =
+      memory.entries.length > 8 ? `\n\n...and ${memory.entries.length - 8} more.` : ''
+    return {
+      text: `${note}\n\n${summaries.join('\n')}${extra}`,
+      citations: memory.citations,
+    }
+  } catch {
+    return { text: note, citations: [] }
+  }
+}
+
 export async function processQuery(text: string): Promise<{ userMessage: Message; assistantMessage: Message }> {
   const userMessage = createUserMessage(text)
-  const { intent, reflectionKeyword, queryType } = detectIntent(text)
+  const route = routeQuery(text)
+  const { intent, reflectionKeyword, queryType } = route
   let response: ResponseOutput
 
   try {
+    if (route.mode === 'knowledge') {
+      return {
+        userMessage,
+        assistantMessage: createAssistantMessage({
+          text: getKnowledgeUnavailableResponse(),
+          citations: [],
+        }),
+      }
+    }
+
+    if (route.mode === 'hybrid') {
+      response = await handleHybridRuleBased({ intent, reflectionKeyword, queryType })
+      return { userMessage, assistantMessage: createAssistantMessage(response) }
+    }
+
     switch (intent) {
       case 'Greeting':
       case 'SmallTalk':
@@ -220,5 +280,6 @@ export async function processQuery(text: string): Promise<{ userMessage: Message
     }
   }
 
-  return { userMessage, assistantMessage: createAssistantMessage(response) }
+  const finalText = await withGuideFollowUp(response.text, text)
+  return { userMessage, assistantMessage: createAssistantMessage({ ...response, text: finalText }) }
 }
